@@ -3,6 +3,7 @@ namespace NextLevelAgentClient
 {
     public partial class LockForm : Form
     {
+        private bool _allowClosed = false;
         private bool _machineUnlocked = false;
 
         private Panel centralPanel;
@@ -42,7 +43,7 @@ namespace NextLevelAgentClient
 
         private void ClosedByDeveloper()
         {
-            _machineUnlocked = false;
+            _allowClosed = true;
 
             if (timerPix != null) timerPix.Stop();
             if (SessiontTimer != null) SessiontTimer.Stop();
@@ -180,7 +181,7 @@ namespace NextLevelAgentClient
             };
             centralPanel.Controls.Add(containerTimerOptions);
 
-            CreateTimerCard("1 Hora", "R$ 5,00", 60);
+            CreateTimerCard("1 Hora", "R$ 5,00", 1);
             CreateTimerCard("2 Horas", "R$ 9,00", 120);
             CreateTimerCard("3 Horas (Desconto)", "R$ 12,00", 180);
 
@@ -370,7 +371,7 @@ namespace NextLevelAgentClient
                 RegistryManager.LockManagerTask();
 
                 MessageBox.Show("Seu tempo acabou! O computador será bloqueado.", "Sessão Encerrada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                
+
                 return;
             }
 
@@ -483,7 +484,7 @@ namespace NextLevelAgentClient
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e) {
-            if (_machineUnlocked)
+            if (!_allowClosed)
             {
                 e.Cancel = true;
                 return;
