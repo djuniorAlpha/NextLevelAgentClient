@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace NextLevelAgentClient
+namespace NextLevelAgentClient.Core
 {
     public static class RegistryManager
     {
@@ -23,11 +23,11 @@ namespace NextLevelAgentClient
             }
             catch (UnauthorizedAccessException)
             {
-                System.Windows.Forms.MessageBox.Show(
+                MessageBox.Show(
                     "Erro: O Agente precisa de privilégios de Administrador para bloquear o Gerenciador de Tarefas.",
                     "Erro de Privilégios",
-                    System.Windows.Forms.MessageBoxButtons.OK,
-                    System.Windows.Forms.MessageBoxIcon.Error
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
                 );
             }
             catch (Exception ex) {
