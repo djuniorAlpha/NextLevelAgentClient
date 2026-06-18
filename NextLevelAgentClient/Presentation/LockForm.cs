@@ -1,27 +1,36 @@
 ﻿
 using NextLevelAgentClient.Core;
+using NextLevelAgentClient.Core.Services;
 using NextLevelAgentClient.Infrastructure;
+using System.Net;
+using System.Net.NetworkInformation;
 
 namespace NextLevelAgentClient
 {
     public partial class LockForm : Form
     {
         private readonly SessionManager _session;
+        private readonly IComputerApiService _apiService;
+
         private bool _allowClose = false;
+        private string _computerUuid = string.Empty;
 
         // UI Components
-        private Panel mainPanel;
-        private Label lblTitle, lblStatus, lblInstructions, lblTimeSubtitle, lblPixSubtitle, lblPixCounter;
-        private FlowLayoutPanel timeOptionsContainer;
-        private Button btnBuyTime, btnBack, btnCopyPix, btnSimulatePayment;
-        private TextBox txtPixCode;
-        private NotifyIcon trayIcon;
+        private Panel? mainPanel;
+        private Label? lblTitle, lblStatus, lblInstructions, lblTimeSubtitle, lblPixSubtitle, lblPixCounter;
+        private FlowLayoutPanel? timeOptionsContainer;
+        private Button? btnBuyTime, btnBack, btnSimulatePayment;
+        private TextBox? txtPixCode;
+        private NotifyIcon? trayIcon;
 
         public LockForm()
         {
             InitializeComponent();
 
             _session = new SessionManager();
+            _apiService = new MockComputerApiService();
+
+
             BindSessionEvents();
 
             ConfigureLockScreen();
@@ -31,58 +40,134 @@ namespace NextLevelAgentClient
             KeyboardHook.OnDeveloperExit += HandleDeveloperExit;
         }
 
+        private async Task SynchronizeHardwareAsync()
+        {
+            lblStatus?.Text = "SYNCHRONIZING WITH SERVER...";
+            lblStatus?.ForeColor = Color.Orange;
+            btnBuyTime?.Enabled = false;
+
+            try
+            {
+                string macAddress = GetLocalMacAddress();
+                string hostname = Dns.GetHostName();
+                string ipAddress = GetLocalIpAddress();
+
+                bool isRegistered = await _apiService.IsComputerRegisteredAsync(macAddress);
+
+                if (!isRegistered)
+                {
+                    lblStatus?.Text = "HARDWARE NOT FOUND. REGISTERING...";
+                    _computerUuid = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
+                    lblStatus?.Text = "REGISTRATION SUCCESSFUL!";
+                    lblStatus?.ForeColor = Color.Green;
+                    await Task.Delay(1000);
+                }
+                else
+                {
+                    lblStatus?.Text = "MACHINE RECORD VERIFIED";
+                    lblStatus?.ForeColor = Color.Green;
+                    await Task.Delay(1000);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Critical Network Error during hardware synchronization: {ex.Message}",
+                                "Sync Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblStatus?.Text = "OFFLINE MODE ACTIVE";
+                lblStatus?.ForeColor = Color.DarkOrange;
+            }
+            finally
+            {
+                // Restore UI state to standard blocked screen layout
+                lblStatus?.Text = "THIS MACHINE IS LOCKED";
+                lblStatus?.ForeColor = Color.Red;
+                btnBuyTime?.Enabled = true;
+            }
+        }
+
+        // Helper method to capture local network IP configuration
+        private string GetLocalIpAddress()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    return ip.ToString(); // e.g., "192.168.1.50"
+                }
+            }
+            return "127.0.0.1";
+        }
+
+        // Helper method to capture the active network adapter MAC Address
+        private string GetLocalMacAddress()
+        {
+            foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+                {
+                    if (nic.OperationalStatus == OperationalStatus.Up)
+                    {
+                        return nic.GetPhysicalAddress().ToString(); // e.g., "001A2B3C4D5E"
+                    }
+                }
+            }
+            return "000000000000";
+        }
+
         private void BindSessionEvents()
         {
             _session.OnStateChanged += RenderState;
-            _session.OnPixTick += (time) => lblPixCounter.Text = $"QR Code expira em: {time:mm\\:ss}";
-            _session.OnSessionTick += (time) => trayIcon.Text = $"CyberManager - Tempo: {time:hh\\:mm\\:ss}";
+            _session.OnPixTick += (time) => lblPixCounter?.Text = $"QR Code expira em: {time:mm\\:ss}";
+            _session.OnSessionTick += (time) => trayIcon?.Text = $"CyberManager - Tempo: {time:hh\\:mm\\:ss}";
 
             _session.OnPixExpired += () => MessageBox.Show("O tempo limite para o pagamento expirou. Gerando nova sessão.", "Pix Expirado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             _session.OnSessionEnded += HandleSessionEnded;
 
             _session.OnSessionTick += (time) => {
                 if (time.TotalSeconds == 15)
-                    trayIcon.ShowBalloonTip(5000, "Atenção!", "Seu tempo está quase acabando! O PC bloqueará em 15 segundos.", ToolTipIcon.Warning);
+                    trayIcon?.ShowBalloonTip(5000, "Atenção!", "Seu tempo está quase acabando! O PC bloqueará em 15 segundos.", ToolTipIcon.Warning);
             };
         }
 
         private void RenderState(MachineState state)
         {
-            lblStatus.Visible = (state == MachineState.InitialBlocked);
-            lblInstructions.Visible = (state == MachineState.InitialBlocked);
-            btnBuyTime.Visible = (state == MachineState.InitialBlocked);
+            lblStatus?.Visible = (state == MachineState.InitialBlocked);
+            lblInstructions?.Visible = (state == MachineState.InitialBlocked);
+            btnBuyTime?.Visible = (state == MachineState.InitialBlocked);
 
-            lblTimeSubtitle.Visible = (state == MachineState.TimeSelection);
-            timeOptionsContainer.Visible = (state == MachineState.TimeSelection);
+            lblTimeSubtitle?.Visible = (state == MachineState.TimeSelection);
+            timeOptionsContainer?.Visible = (state == MachineState.TimeSelection);
 
-            lblPixSubtitle.Visible = (state == MachineState.WaitingForPix);
-            txtPixCode.Visible = (state == MachineState.WaitingForPix);
-            lblPixCounter.Visible = (state == MachineState.WaitingForPix);
-            btnSimulatePayment.Visible = (state == MachineState.WaitingForPix);
+            lblPixSubtitle?.Visible = (state == MachineState.WaitingForPix);
+            txtPixCode?.Visible = (state == MachineState.WaitingForPix);
+            lblPixCounter?.Visible = (state == MachineState.WaitingForPix);
+            btnSimulatePayment?.Visible = (state == MachineState.WaitingForPix);
 
-            btnBack.Visible = (state == MachineState.TimeSelection || state == MachineState.WaitingForPix);
+            btnBack?.Visible = (state == MachineState.TimeSelection || state == MachineState.WaitingForPix);
 
             if (state == MachineState.ActiveSession)
             {
                 this.Hide();
-                trayIcon.Visible = true;
-                trayIcon.ShowBalloonTip(3000, "Acesso Liberado!", "Aproveite sua sessão", ToolTipIcon.Info);
+                trayIcon?.Visible = true;
+                trayIcon?.ShowBalloonTip(3000, "Acesso Liberado!", "Aproveite sua sessão", ToolTipIcon.Info);
             }
         }
 
         private void HandleSessionEnded()
         {
-            trayIcon.Visible = false;
+            trayIcon?.Visible = false;
             ConfigureLockScreen();
             this.Show();
-            mainPanel.Visible = true;
+            mainPanel?.Visible = true;
 
             MessageBox.Show("Seu tempo acabou! O computador será bloqueado.", "Sessão Encerrada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
-        private void BtnBuyTime_Click(object sender, EventArgs e) => _session.ChangeState(MachineState.TimeSelection);
+        private void BtnBuyTime_Click(object? sender, EventArgs e) => _session.ChangeState(MachineState.TimeSelection);
 
-        private void BtnBack_Click(object sender, EventArgs e)
+        private void BtnBack_Click(object? sender, EventArgs e)
         {
             if (_session.CurrentState == MachineState.WaitingForPix)
                 _session.CancelOperation();
@@ -90,19 +175,22 @@ namespace NextLevelAgentClient
                 _session.ChangeState(MachineState.InitialBlocked);
         }
 
-        private void TimeOption_Click(object sender, EventArgs e)
+        private void TimeOption_Click(object? sender, EventArgs e)
         {
-            int minutes = (int)((Button)sender).Tag;
-            _session.StartPixExpectancy(minutes);
+            if (sender is Button btn && btn.Tag is int minutes)
+            {
+                _session.StartPixExpectancy(minutes);
+            }
         }
 
-        private void BtnSimulatePayment_Click(object sender, EventArgs e) => _session.ConfirmPixPayment();
+        private void BtnSimulatePayment_Click(object? sender, EventArgs e) => _session.ConfirmPixPayment();
 
         private void ConfigureLockScreen()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.TopMost = true;
-            this.Bounds = Screen.PrimaryScreen.Bounds;
+            Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1024, 768);
+            this.Bounds = bounds;
             this.ShowInTaskbar = false;
             this.BackColor = Color.FromArgb(15, 15, 25);
         }
@@ -143,7 +231,7 @@ namespace NextLevelAgentClient
         {
             _allowClose = true;
             _session.CancelOperation();
-            if (trayIcon != null) trayIcon.Visible = false;
+            if (trayIcon != null) trayIcon?.Visible = false;
             KeyboardHook.Stop();
             RegistryManager.UnlockManagerTask();
             this.TopMost = false;
@@ -151,17 +239,20 @@ namespace NextLevelAgentClient
             this.Close();
         }
 
-        protected override void OnLoad(EventArgs e)
+        protected override async void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
             KeyboardHook.Start();
             RegistryManager.LockManagerTask();
+
+            // Fire and forget hardware sync without freezing the UI layout thread
+            await SynchronizeHardwareAsync();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (!_allowClose) { e.Cancel = true; return; }
-            if (trayIcon != null) trayIcon.Visible = false;
+            if (trayIcon != null) trayIcon?.Visible = false;
             base.OnFormClosing(e);
         }
 

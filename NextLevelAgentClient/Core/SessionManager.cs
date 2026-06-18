@@ -15,11 +15,11 @@ namespace NextLevelAgentClient.Core
         public int RemainingSessionTime { get; private set; }
         public MachineState CurrentState { get; private set; }
 
-        public event Action<MachineState> OnStateChanged;
-        public event Action<TimeSpan> OnPixTick;
-        public event Action<TimeSpan> OnSessionTick;
-        public event Action OnPixExpired;
-        public event Action OnSessionEnded;
+        public event Action<MachineState>? OnStateChanged;
+        public event Action<TimeSpan>? OnPixTick;
+        public event Action<TimeSpan>? OnSessionTick;
+        public event Action? OnPixExpired;
+        public event Action? OnSessionEnded;
 
         public SessionManager()
         {
