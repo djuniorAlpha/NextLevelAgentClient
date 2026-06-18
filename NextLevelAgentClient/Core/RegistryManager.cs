@@ -35,14 +35,15 @@ namespace NextLevelAgentClient.Core
             }
         }
 
-        public static void UnlockManagerTask() {
+        public static void UnlockManagerTask()
+        {
             try
             {
-                using RegistryKey key = Registry.CurrentUser.OpenSubKey(REGISTRY_PATH, true);
-                if(key != null) {
-                    key.DeleteValue(VALUE_NAME, false);
-                }
-            } catch (Exception ex) {
+                using RegistryKey? key = Registry.CurrentUser.OpenSubKey(REGISTRY_PATH, true);
+                key?.DeleteValue(VALUE_NAME, false);
+            }
+            catch (Exception ex)
+            {
                 Console.WriteLine($"Erro ao liberar o registro: {ex.Message}");
             }
         }

@@ -14,7 +14,7 @@ namespace NextLevelAgentClient.Infrastructure
         private const int WM_KEYDOWN = 0x0100;
         private const int WM_SYSKEYDOWN = 0x0104;
 
-        public static event Action OnDeveloperExit;
+        public static event Action? OnDeveloperExit;
 
         private static LowLevelKeyboardProc _proc = HookCallback;
         private static nint _hookID = nint.Zero;
@@ -47,7 +47,7 @@ namespace NextLevelAgentClient.Infrastructure
         private static nint SetHook(LowLevelKeyboardProc proc)
         {
             using Process curProcess = Process.GetCurrentProcess();
-            using ProcessModule curModule = curProcess.MainModule;
+            using ProcessModule? curModule = curProcess.MainModule;
             return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(curModule.ModuleName), 0);
         }
 
