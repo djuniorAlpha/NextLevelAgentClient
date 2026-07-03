@@ -38,6 +38,13 @@ namespace NextLevelAgentClient.Core
             OnStateChanged?.Invoke(newState);
         }
 
+        public void ConfirmLogin()
+        {
+            RemainingSessionTime = 30;
+            _sessionTimer.Start();
+            ChangeState(MachineState.ActiveSession);
+        }
+
         public void StartPixExpectancy(int selectedMinutes)
         {
             RemainingSessionTime = selectedMinutes * 60;
