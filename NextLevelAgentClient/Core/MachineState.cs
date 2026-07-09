@@ -10,6 +10,7 @@ namespace NextLevelAgentClient.Core
     {
         InitialBlocked,
         TimeSelection,
+        Login,
         WaitingForPix,
         ActiveSession
     }
