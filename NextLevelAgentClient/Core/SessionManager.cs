@@ -38,9 +38,9 @@ namespace NextLevelAgentClient.Core
             OnStateChanged?.Invoke(newState);
         }
 
-        public void ConfirmLogin()
+        public void ConfirmLogin(int time)
         {
-            RemainingSessionTime = 30;
+            RemainingSessionTime = time;
             _sessionTimer.Start();
             ChangeState(MachineState.ActiveSession);
         }

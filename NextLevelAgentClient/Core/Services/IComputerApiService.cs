@@ -1,4 +1,5 @@
-﻿using System;
+﻿using NextLevelAgentClient.Core.Modal;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -22,5 +23,7 @@ namespace NextLevelAgentClient.Core.Services
         /// Sends a periodic status signal to the backend to maintain the machine connection live.
         /// </summary>
         Task<bool> SendHeartbeatAsync(string computerUuid, string currentStatus);
+
+        Task <LoginResponse>SendLoginRequestAsync(string computerUuid, string username, string password);
     }
 }

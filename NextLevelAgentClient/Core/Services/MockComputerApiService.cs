@@ -1,4 +1,5 @@
-﻿using System;
+﻿using NextLevelAgentClient.Core.Modal;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -32,6 +33,18 @@ namespace NextLevelAgentClient.Core.Services
             Debug.WriteLine($"[HEARTBEAT] Signal sent safely for Machine {computerUuid}. Status: {currentStatus} at {DateTime.Now}");
 
             return true;
+        }
+
+        public async Task<LoginResponse> SendLoginRequestAsync(string computerUuid, string username, string password)
+        {
+            LoginResponse loginResponse = new LoginResponse();
+            if (username == "admin" && password == "admin")
+            {
+                loginResponse._isValid = true;
+                loginResponse._sessionTime = 60;
+                return loginResponse;
+            }
+            return loginResponse;
         }
     }
 }

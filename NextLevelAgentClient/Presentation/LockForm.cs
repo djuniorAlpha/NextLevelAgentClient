@@ -1,5 +1,6 @@
 ﻿
 using NextLevelAgentClient.Core;
+using NextLevelAgentClient.Core.Modal;
 using NextLevelAgentClient.Core.Services;
 using NextLevelAgentClient.Infrastructure;
 using System.Net;
@@ -163,16 +164,25 @@ namespace NextLevelAgentClient
 
         private void BtnLogin_Click(object? sender, EventArgs e) => _session.ChangeState(MachineState.Login);
 
-        private void BtnLoginRequest_Click(object? sender, EventArgs e)
+        logout
+        private async void BtnLoginRequest_Click(object? sender, EventArgs e)
         {
-            if (txtUsername?.Text == "admin" && txtPassword?.Text == "admin")
+            if (string.IsNullOrWhiteSpace(txtUsername?.Text) || string.IsNullOrWhiteSpace(txtPassword?.Text))
             {
-                _session.ConfirmLogin();
+                MessageBox.Show("Por favor, preencha ambos os campos de usuário e senha.", "Campos Vazios", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
             }
-            else
+
+            LoginResponse loginResponse = await _apiService.SendLoginRequestAsync(GetLocalMacAddress(), txtUsername?.Text, txtPassword?.Text);
+            if (loginResponse._isValid)
             {
-                MessageBox.Show("Credenciais inválidas. Tente novamente.", "Erro de Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _session.ConfirmLogin(loginResponse._sessionTime);
+                txtUsername.Clear();
+                txtPassword.Clear();
+                return;
             }
+
+            MessageBox.Show("Credenciais inválidas. Tente novamente.", "Erro de Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
         private void BtnBack_Click(object? sender, EventArgs e)
@@ -213,7 +223,7 @@ namespace NextLevelAgentClient
         {
             try
             {
-                string path = Path.Combine(AppContext.BaseDirectory, "Images", "Logo.jpeg");
+                string path = Path.Combine(AppContext.BaseDirectory, "Images", "Logo.png");
                 return File.Exists(path) ? Image.FromFile(path) : null;
             }
             catch
@@ -231,11 +241,22 @@ namespace NextLevelAgentClient
             mainPanel.SuspendLayout();
             this.Controls.Add(mainPanel);
 
-            var pictureBox = new PictureBox { Name = "pictureBoxLogo", Size = new Size(50, 60), Location = new Point(40, 40), SizeMode = PictureBoxSizeMode.Zoom, Image = LoadLogoImage() };
-            mainPanel.Controls.Add(pictureBox);
+            var pictureBox = new PictureBox { Name = "pictureBoxLogo", Size = new Size(70, 80), Margin = new Padding(0, 0, 0, 0),  SizeMode = PictureBoxSizeMode.Zoom, Image = LoadLogoImage() };
+            lblTitle = new Label { Text = "CyberManager", Font = new Font("Segoe UI", 28, FontStyle.Bold), ForeColor = Color.White, Size = new Size(300, 60), Margin = Padding.Empty, TextAlign = ContentAlignment.MiddleLeft};
 
-            lblTitle = new Label { Text = "CyberManager", Font = new Font("Segoe UI", 28, FontStyle.Bold), ForeColor = Color.White, Size = new Size(400, 60), Location = new Point(50, 40), TextAlign = ContentAlignment.MiddleCenter };
-            mainPanel.Controls.Add(lblTitle);
+            int headerWidth = pictureBox.Width + pictureBox.Margin.Horizontal + lblTitle.Width + lblTitle.Margin.Horizontal;
+            var headerContainer = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = false,
+                Size = new Size(headerWidth, 80),
+                Location = new Point((mainPanel.Width - headerWidth) / 2, 40),
+                BackColor = Color.Transparent
+            };
+            headerContainer.Controls.Add(pictureBox);
+            headerContainer.Controls.Add(lblTitle);
+            mainPanel.Controls.Add(headerContainer);
 
             var size = new Size(mainPanel.Width, 500);
             var panelBounds = new Rectangle(Point.Empty, size);
@@ -331,6 +352,20 @@ namespace NextLevelAgentClient
         protected override CreateParams CreateParams
         {
             get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00000080; return cp; }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Enter)
+            {
+                if (_session.CurrentState == MachineState.Login)
+                {
+                    btnLoginRequest?.PerformClick();
+                }
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
     }
 }
