@@ -9,14 +9,15 @@ namespace NextLevelAgentClient.Core.Services
     public interface IComputerApiService
     {
         /// <summary>
-        /// Validates if the computer is already registered in the backend cloud database.
+        /// Retrieves this computer's existing registration (including its assigned machine number),
+        /// or null if it isn't registered in the backend yet.
         /// </summary>
-        Task<bool> IsComputerRegisteredAsync(string macAddress);
+        Task<MachineRegistration?> GetRegistrationAsync(string macAddress);
 
         /// <summary>
-        /// Registers this hardware instance in the backend pool.
+        /// Registers this hardware instance in the backend pool, which assigns it a machine number.
         /// </summary>
-        Task<string> RegisterComputerAsync(string macAddress, string hostname, string ipAddress);
+        Task<MachineRegistration> RegisterComputerAsync(string macAddress, string hostname, string ipAddress);
 
         /// <summary>
         /// Sends a periodic status signal to the backend to maintain the machine connection live.

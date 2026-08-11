@@ -19,6 +19,7 @@ namespace NextLevelAgentClient
 
         private bool _allowClose = false;
         private string _computerUuid = string.Empty;
+        private int? _machineNumber;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
@@ -127,12 +128,12 @@ namespace NextLevelAgentClient
                 string hostname = Dns.GetHostName();
                 string ipAddress = GetLocalIpAddress();
 
-                bool isRegistered = await _apiService.IsComputerRegisteredAsync(macAddress);
+                MachineRegistration? registration = await _apiService.GetRegistrationAsync(macAddress);
 
-                if (!isRegistered)
+                if (registration == null)
                 {
                     PostToJs(new { type = "status", text = "HARDWARE NÃO ENCONTRADO. REGISTRANDO...", color = "warning" });
-                    _computerUuid = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
+                    registration = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
                     PostToJs(new { type = "status", text = "REGISTRO CONCLUÍDO!", color = "success" });
                     await Task.Delay(1000);
                 }
@@ -141,6 +142,10 @@ namespace NextLevelAgentClient
                     PostToJs(new { type = "status", text = "MÁQUINA VERIFICADA", color = "success" });
                     await Task.Delay(1000);
                 }
+
+                _computerUuid = registration.ComputerUuid;
+                _machineNumber = registration.MachineNumber;
+                PostToJs(new { type = "machineNumber", number = _machineNumber });
             }
             catch (Exception ex)
             {

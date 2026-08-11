@@ -9,18 +9,21 @@ namespace NextLevelAgentClient.Core.Services
 {
     public class MockComputerApiService : IComputerApiService
     {
-        public async Task<bool> IsComputerRegisteredAsync(string macAddress)
+        public async Task<MachineRegistration?> GetRegistrationAsync(string macAddress)
         {
             await Task.Delay(1500);
 
-            return false;
+            // Sem backend real ainda: simula que a máquina nunca foi registrada antes.
+            return null;
         }
 
-        public async Task<string> RegisterComputerAsync(string macAddress, string hostname, string ipAddress)
+        public async Task<MachineRegistration> RegisterComputerAsync(string macAddress, string hostname, string ipAddress)
         {
             await Task.Delay(2000);
 
-            return Guid.NewGuid().ToString();
+            // Sem backend real ainda: simula o número que seria atribuído pelo painel de gestão.
+            int simulatedMachineNumber = Random.Shared.Next(1, 100);
+            return new MachineRegistration(Guid.NewGuid().ToString(), simulatedMachineNumber);
         }
 
         public async Task<bool> SendHeartbeatAsync(string computerUuid, string currentStatus)

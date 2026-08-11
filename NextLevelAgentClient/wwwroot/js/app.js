@@ -12,6 +12,7 @@
   const statusBadge = document.getElementById("statusBadge");
   const statusText = document.getElementById("statusText");
   const pixCounter = document.getElementById("pixCounter");
+  const machineNumberEl = document.getElementById("machineNumber");
 
   const alertOverlay = document.getElementById("alertOverlay");
   const alertIcon = document.getElementById("alertIcon");
@@ -50,6 +51,10 @@
     statusBadge.classList.add(statusClassByColor[color] ?? "status-danger");
   }
 
+  function setMachineNumber(number) {
+    machineNumberEl.textContent = `Máquina Nº ${String(number).padStart(2, "0")}`;
+  }
+
   function showAlert(alertType, title, message) {
     alertIcon.textContent = alertIconByType[alertType] ?? alertIconByType.info;
     alertIcon.className = `alert-icon alert-icon-${alertType}`;
@@ -72,6 +77,9 @@
           break;
         case "pixTick":
           pixCounter.textContent = msg.text;
+          break;
+        case "machineNumber":
+          setMachineNumber(msg.number);
           break;
         case "alert":
           showAlert(msg.alertType, msg.title, msg.text);
