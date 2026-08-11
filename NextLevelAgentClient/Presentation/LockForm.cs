@@ -188,7 +188,7 @@ namespace NextLevelAgentClient
         {
             _session.OnStateChanged += HandleStateChanged;
             _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"QR Code expira em: {time:mm\\:ss}" });
-            _session.OnSessionTick += (time) => trayIcon?.Text = $"CyberManager - Tempo: {time:hh\\:mm\\:ss}";
+            _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
             _session.OnPixExpired += () => ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");
             _session.OnSessionEnded += HandleSessionEnded;
@@ -231,7 +231,20 @@ namespace NextLevelAgentClient
             this.BackColor = Color.FromArgb(15, 15, 25);
         }
 
-        private void ConfigureTrayIcon() => trayIcon = new NotifyIcon { Icon = SystemIcons.Information, Visible = false };
+        private void ConfigureTrayIcon() => trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false };
+
+        private static Icon LoadTrayIcon()
+        {
+            try
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", "tray-icon.ico");
+                return File.Exists(path) ? new Icon(path) : SystemIcons.Information;
+            }
+            catch
+            {
+                return SystemIcons.Information;
+            }
+        }
 
         private void HandleDeveloperExit()
         {
