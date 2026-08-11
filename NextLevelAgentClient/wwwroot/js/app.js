@@ -13,10 +13,23 @@
   const statusText = document.getElementById("statusText");
   const pixCounter = document.getElementById("pixCounter");
 
+  const alertOverlay = document.getElementById("alertOverlay");
+  const alertIcon = document.getElementById("alertIcon");
+  const alertTitle = document.getElementById("alertTitle");
+  const alertMessage = document.getElementById("alertMessage");
+  const alertOk = document.getElementById("alertOk");
+
   const statusClassByColor = {
     danger: "status-danger",
     success: "status-success",
     warning: "status-warning",
+  };
+
+  const alertIconByType = {
+    error: "⛔",
+    warning: "⚠️",
+    success: "✅",
+    info: "ℹ️",
   };
 
   function send(action, extra) {
@@ -37,6 +50,16 @@
     statusBadge.classList.add(statusClassByColor[color] ?? "status-danger");
   }
 
+  function showAlert(alertType, title, message) {
+    alertIcon.textContent = alertIconByType[alertType] ?? alertIconByType.info;
+    alertIcon.className = `alert-icon alert-icon-${alertType}`;
+    alertTitle.textContent = title;
+    alertMessage.textContent = message;
+    alertOverlay.classList.add("active");
+  }
+
+  alertOk.addEventListener("click", () => alertOverlay.classList.remove("active"));
+
   if (chromeHost) {
     chromeHost.addEventListener("message", (event) => {
       const msg = event.data;
@@ -49,6 +72,9 @@
           break;
         case "pixTick":
           pixCounter.textContent = msg.text;
+          break;
+        case "alert":
+          showAlert(msg.alertType, msg.title, msg.text);
           break;
       }
     });

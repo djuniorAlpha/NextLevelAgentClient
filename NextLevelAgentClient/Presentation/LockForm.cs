@@ -64,6 +64,11 @@ namespace NextLevelAgentClient
             webView?.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(payload, JsonOptions));
         }
 
+        private void ShowAlert(string alertType, string title, string message)
+        {
+            PostToJs(new { type = "alert", alertType, title, text = message });
+        }
+
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             string? json = e.TryGetWebMessageAsString();
@@ -100,7 +105,7 @@ namespace NextLevelAgentClient
             }
             else
             {
-                MessageBox.Show("Credenciais inválidas. Tente novamente.", "Erro de Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ShowAlert("error", "Erro de Login", "Credenciais inválidas. Tente novamente.");
             }
         }
 
@@ -139,8 +144,7 @@ namespace NextLevelAgentClient
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Erro crítico de rede durante a sincronização do hardware: {ex.Message}",
-                                "Falha de Sincronização", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ShowAlert("error", "Falha de Sincronização", $"Erro crítico de rede durante a sincronização do hardware: {ex.Message}");
                 PostToJs(new { type = "status", text = "MODO OFFLINE ATIVO", color = "warning" });
             }
             finally
@@ -186,7 +190,7 @@ namespace NextLevelAgentClient
             _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"QR Code expira em: {time:mm\\:ss}" });
             _session.OnSessionTick += (time) => trayIcon?.Text = $"CyberManager - Tempo: {time:hh\\:mm\\:ss}";
 
-            _session.OnPixExpired += () => MessageBox.Show("O tempo limite para o pagamento expirou. Gerando nova sessão.", "Pix Expirado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _session.OnPixExpired += () => ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");
             _session.OnSessionEnded += HandleSessionEnded;
 
             _session.OnSessionTick += (time) =>
@@ -214,7 +218,7 @@ namespace NextLevelAgentClient
             ConfigureLockScreen();
             this.Show();
 
-            MessageBox.Show("Seu tempo acabou! O computador será bloqueado.", "Sessão Encerrada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowAlert("warning", "Sessão Encerrada", "Seu tempo acabou! O computador será bloqueado.");
         }
 
         private void ConfigureLockScreen()
@@ -245,9 +249,15 @@ namespace NextLevelAgentClient
         {
             base.OnLoad(e);
             KeyboardHook.Start();
-            RegistryManager.LockManagerTask();
+            bool hasTaskManagerLockPrivilege = RegistryManager.LockManagerTask();
 
             await InitializeWebViewAsync();
+
+            if (!hasTaskManagerLockPrivilege)
+            {
+                ShowAlert("error", "Erro de Privilégios", "O Agente precisa de privilégios de Administrador para bloquear o Gerenciador de Tarefas.");
+            }
+
             await SynchronizeHardwareAsync();
         }
 
