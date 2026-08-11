@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>CyberManager</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="glow"></div>
+
+  <main class="card">
+    <button id="btnBack" class="btn-back" type="button">&larr; Voltar</button>
+
+    <header class="card-header">
+      <img class="logo" src="assets/logo.jpeg" alt="Logo" />
+      <h1>CyberManager</h1>
+    </header>
+
+    <section id="panel-blocked" class="panel active">
+      <div id="statusBadge" class="status-badge status-danger">
+        <span class="dot"></span>
+        <span id="statusText">ESTA MÁQUINA ESTÁ BLOQUEADA</span>
+      </div>
+      <p class="instructions">
+        Para liberar o acesso e começar a navegar, escolha uma das opções abaixo.
+      </p>
+      <div class="actions">
+        <button id="btnBuyTime" class="btn btn-primary" type="button">🛒 Comprar tempo</button>
+        <button id="btnLogin" class="btn btn-outline" type="button">🔑 Login</button>
+      </div>
+    </section>
+
+    <section id="panel-time" class="panel">
+      <h2 class="subtitle">Selecione o tempo de uso desejado</h2>
+      <div id="timeOptions" class="time-options">
+        <button class="time-option" type="button" data-minutes="1">
+          <span class="time-option-label">1 minuto (teste)</span>
+          <span class="time-option-price">R$ 0,10</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="panel-pix" class="panel">
+      <h2 class="subtitle">Escaneie o QR Code para pagar</h2>
+      <div class="pix-box">[ QR CODE PIX ]</div>
+      <p id="pixCounter" class="pix-counter">QR Code expira em: 05:00</p>
+      <button id="btnSimulatePayment" class="btn btn-primary" type="button">🟢 Simular: Pix pago</button>
+    </section>
+
+    <section id="panel-login" class="panel">
+      <h2 class="subtitle">Faça login</h2>
+      <div class="form">
+        <input id="txtUsername" class="input" type="text" placeholder="Usuário" autocomplete="off" />
+        <input id="txtPassword" class="input" type="password" placeholder="Senha" autocomplete="off" />
+        <button id="btnLoginRequest" class="btn btn-primary" type="button">Entrar</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
