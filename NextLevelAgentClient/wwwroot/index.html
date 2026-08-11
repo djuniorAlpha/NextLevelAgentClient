@@ -12,15 +12,24 @@
     <button id="btnBack" class="btn-back" type="button">&larr; Voltar</button>
 
     <header class="card-header">
-      <img class="logo" src="assets/logo.svg" alt="Next Level Gaming House" />
+      <div class="logo-ring">
+        <div class="logo-ring-inner">
+          <img class="logo-icon" src="assets/icon.svg" alt="Next Level" />
+        </div>
+      </div>
+      <h1 class="brand-name">Next Level<span>Gaming House</span></h1>
+      <div id="machineNumber" class="machine-number">Máquina —</div>
     </header>
 
-    <div id="machineNumber" class="machine-number">Máquina —</div>
+    <div class="divider"></div>
 
     <section id="panel-blocked" class="panel active">
-      <div id="statusBadge" class="status-badge status-danger">
-        <span class="dot"></span>
-        <span id="statusText">ESTA MÁQUINA ESTÁ BLOQUEADA</span>
+      <div class="status-row">
+        <span id="statusChip" class="status-chip status-danger">●</span>
+        <div class="status-copy">
+          <span class="status-label">Status</span>
+          <span id="statusText" class="status-value">ESTA MÁQUINA ESTÁ BLOQUEADA</span>
+        </div>
       </div>
       <p class="instructions">
         Para liberar o acesso e começar a navegar, escolha uma das opções abaixo.
@@ -33,10 +42,11 @@
 
     <section id="panel-time" class="panel">
       <h2 class="subtitle">Selecione o tempo de uso desejado</h2>
-      <div id="timeOptions" class="time-options">
-        <button class="time-option" type="button" data-minutes="1">
-          <span class="time-option-label">1 minuto (teste)</span>
-          <span class="time-option-price">R$ 0,10</span>
+      <div id="timeOptions" class="time-grid">
+        <button class="time-card" type="button" data-minutes="1">
+          <span class="time-card-duration">1 min</span>
+          <span class="time-card-label">Teste</span>
+          <span class="time-card-price">R$ 0,10</span>
         </button>
       </div>
     </section>
@@ -44,7 +54,13 @@
     <section id="panel-pix" class="panel">
       <h2 class="subtitle">Escaneie o QR Code para pagar</h2>
       <div class="pix-box">[ QR CODE PIX ]</div>
-      <p id="pixCounter" class="pix-counter">QR Code expira em: 05:00</p>
+      <div class="timer-row">
+        <span class="timer-icon">⏱</span>
+        <div class="timer-copy">
+          <span class="timer-label">Expira em</span>
+          <span id="pixCounter" class="timer-value">05:00</span>
+        </div>
+      </div>
       <button id="btnSimulatePayment" class="btn btn-primary" type="button">🟢 Simular: Pix pago</button>
     </section>
 
@@ -56,6 +72,13 @@
         <button id="btnLoginRequest" class="btn btn-primary" type="button">Entrar</button>
       </div>
     </section>
+
+    <div class="divider"></div>
+
+    <footer class="card-footer">
+      <span>Next Level Gaming House</span>
+      <span>v1.0</span>
+    </footer>
   </main>
 
   <div id="alertOverlay" class="alert-overlay">

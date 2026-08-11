@@ -192,7 +192,7 @@ namespace NextLevelAgentClient
         private void BindSessionEvents()
         {
             _session.OnStateChanged += HandleStateChanged;
-            _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"QR Code expira em: {time:mm\\:ss}" });
+            _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"{time:mm\\:ss}" });
             _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
             _session.OnPixExpired += () => ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");

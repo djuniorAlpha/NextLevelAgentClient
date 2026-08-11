@@ -9,7 +9,7 @@
   };
 
   const btnBack = document.getElementById("btnBack");
-  const statusBadge = document.getElementById("statusBadge");
+  const statusChip = document.getElementById("statusChip");
   const statusText = document.getElementById("statusText");
   const pixCounter = document.getElementById("pixCounter");
   const machineNumberEl = document.getElementById("machineNumber");
@@ -47,8 +47,8 @@
 
   function setStatus(text, color) {
     statusText.textContent = text;
-    statusBadge.classList.remove("status-danger", "status-success", "status-warning");
-    statusBadge.classList.add(statusClassByColor[color] ?? "status-danger");
+    statusChip.classList.remove("status-danger", "status-success", "status-warning");
+    statusChip.classList.add(statusClassByColor[color] ?? "status-danger");
   }
 
   function setMachineNumber(number) {
