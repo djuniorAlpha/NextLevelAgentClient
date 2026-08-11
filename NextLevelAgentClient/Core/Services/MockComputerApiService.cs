@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -9,11 +9,19 @@ namespace NextLevelAgentClient.Core.Services
 {
     public class MockComputerApiService : IComputerApiService
     {
+        private readonly string _backendBaseUrl;
+
+        public MockComputerApiService(string backendBaseUrl)
+        {
+            _backendBaseUrl = backendBaseUrl;
+        }
+
         public async Task<MachineRegistration?> GetRegistrationAsync(string macAddress)
         {
             await Task.Delay(1500);
 
-            // Sem backend real ainda: simula que a máquina nunca foi registrada antes.
+            // Sem backend real ainda: simula a chamada e que a máquina nunca foi registrada antes.
+            Debug.WriteLine($"[MOCK] GET {_backendBaseUrl}/machines?mac={macAddress}");
             return null;
         }
 
@@ -21,7 +29,8 @@ namespace NextLevelAgentClient.Core.Services
         {
             await Task.Delay(2000);
 
-            // Sem backend real ainda: simula o número que seria atribuído pelo painel de gestão.
+            // Sem backend real ainda: simula a chamada e o número que seria atribuído pelo painel de gestão.
+            Debug.WriteLine($"[MOCK] POST {_backendBaseUrl}/machines");
             int simulatedMachineNumber = Random.Shared.Next(1, 100);
             return new MachineRegistration(Guid.NewGuid().ToString(), simulatedMachineNumber);
         }
@@ -32,7 +41,7 @@ namespace NextLevelAgentClient.Core.Services
             await Task.Delay(200);
 
             // Console/Debug write to verify background execution without interrupting UI
-            Debug.WriteLine($"[HEARTBEAT] Signal sent safely for Machine {computerUuid}. Status: {currentStatus} at {DateTime.Now}");
+            Debug.WriteLine($"[MOCK] POST {_backendBaseUrl}/machines/{computerUuid}/heartbeat. Status: {currentStatus} at {DateTime.Now}");
 
             return true;
         }

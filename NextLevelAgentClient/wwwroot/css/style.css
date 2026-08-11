@@ -409,6 +409,11 @@ body {
   letter-spacing: 0.3px;
 }
 
+.env-version.env-dev {
+  color: var(--warning);
+  font-weight: 700;
+}
+
 .alert-overlay {
   position: fixed;
   inset: 0;

@@ -29,7 +29,7 @@ namespace NextLevelAgentClient
             InitializeComponent();
 
             _session = new SessionManager();
-            _apiService = new MockComputerApiService();
+            _apiService = new MockComputerApiService(AppConfig.Current.BackendBaseUrl);
 
             BindSessionEvents();
 
@@ -270,6 +270,7 @@ namespace NextLevelAgentClient
             bool hasTaskManagerLockPrivilege = RegistryManager.LockManagerTask();
 
             await InitializeWebViewAsync();
+            PostToJs(new { type = "environment", value = AppConfig.Current.Environment.ToString().ToUpperInvariant() });
 
             if (!hasTaskManagerLockPrivilege)
             {

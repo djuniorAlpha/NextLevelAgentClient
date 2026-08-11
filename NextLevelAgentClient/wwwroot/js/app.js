@@ -19,6 +19,7 @@
   const alertTitle = document.getElementById("alertTitle");
   const alertMessage = document.getElementById("alertMessage");
   const alertOk = document.getElementById("alertOk");
+  const envVersion = document.getElementById("envVersion");
 
   const statusClassByColor = {
     danger: "status-danger",
@@ -55,6 +56,11 @@
     machineNumberEl.textContent = `Máquina Nº ${String(number).padStart(2, "0")}`;
   }
 
+  function setEnvironment(value) {
+    envVersion.textContent = `${value} • v1.0`;
+    envVersion.classList.toggle("env-dev", value === "DEV");
+  }
+
   function showAlert(alertType, title, message) {
     alertIcon.textContent = alertIconByType[alertType] ?? alertIconByType.info;
     alertIcon.className = `alert-icon alert-icon-${alertType}`;
@@ -81,6 +87,9 @@
         case "machineNumber":
           setMachineNumber(msg.number);
           break;
+        case "environment":
+          setEnvironment(msg.value);
+          break;
         case "alert":
           showAlert(msg.alertType, msg.title, msg.text);
           break;
@@ -93,7 +102,7 @@
   document.getElementById("btnBack").addEventListener("click", () => send("back"));
   document.getElementById("btnSimulatePayment").addEventListener("click", () => send("simulatePayment"));
 
-  document.querySelectorAll(".time-option").forEach((btn) => {
+  document.querySelectorAll(".time-card").forEach((btn) => {
     btn.addEventListener("click", () => {
       send("selectTime", { minutes: parseInt(btn.dataset.minutes, 10) });
     });
