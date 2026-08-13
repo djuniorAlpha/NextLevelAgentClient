@@ -166,7 +166,7 @@ namespace NextLevelAgentClient
             }
             catch (Exception ex)
             {
-                ShowAlert("error", "Erro de Login", $"Não foi possível entrar: {ex.Message}");
+                ShowAlert("error", "Erro de Login", ex.Message);
             }
         }
 
@@ -201,7 +201,7 @@ namespace NextLevelAgentClient
             }
             catch (Exception ex)
             {
-                ShowAlert("error", "Erro ao trocar senha", $"Não foi possível definir a nova senha: {ex.Message}");
+                ShowAlert("error", "Erro ao trocar senha", ex.Message);
             }
         }
 
@@ -222,7 +222,7 @@ namespace NextLevelAgentClient
             }
             catch (Exception ex)
             {
-                ShowAlert("error", "Erro ao iniciar sessão", $"Não foi possível iniciar a sessão: {ex.Message}");
+                ShowAlert("error", "Erro ao iniciar sessão", ex.Message);
             }
         }
 

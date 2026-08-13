@@ -114,7 +114,7 @@ namespace NextLevelAgentClient.Core.Services
         {
             var payload = new { username, password };
             using HttpResponseMessage response = await _http.PostAsJsonAsync("auth/customer/login", payload, JsonOptions);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessOrThrowFriendlyAsync(response);
             CustomerLoginResult? result = await response.Content.ReadFromJsonAsync<CustomerLoginResult>(JsonOptions);
             return result ?? throw new InvalidOperationException("Resposta vazia do backend ao fazer login.");
         }
@@ -126,7 +126,7 @@ namespace NextLevelAgentClient.Core.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
 
             using HttpResponseMessage response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessOrThrowFriendlyAsync(response);
             StartSessionResult? result = await response.Content.ReadFromJsonAsync<StartSessionResult>(JsonOptions);
             return result ?? throw new InvalidOperationException("Resposta vazia do backend ao iniciar sessão.");
         }
@@ -140,7 +140,7 @@ namespace NextLevelAgentClient.Core.Services
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
 
             using HttpResponseMessage response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessOrThrowFriendlyAsync(response);
             ChangePasswordResult? result = await response.Content.ReadFromJsonAsync<ChangePasswordResult>(JsonOptions);
             return result ?? new ChangePasswordResult(true, null);
         }
@@ -164,5 +164,27 @@ namespace NextLevelAgentClient.Core.Services
                 return false;
             }
         }
+
+        // O NestJS devolve { message, error, statusCode } em erros - lê isso em vez de deixar
+        // o EnsureSuccessStatusCode() jogar o texto genérico do .NET ("Response status code...").
+        private static async Task EnsureSuccessOrThrowFriendlyAsync(HttpResponseMessage response)
+        {
+            if (response.IsSuccessStatusCode) return;
+
+            string? message = null;
+            try
+            {
+                NestErrorBody? body = await response.Content.ReadFromJsonAsync<NestErrorBody>(JsonOptions);
+                message = body?.Message;
+            }
+            catch
+            {
+                // Corpo não veio no formato esperado; usa a mensagem genérica abaixo.
+            }
+
+            throw new InvalidOperationException(message ?? $"Erro inesperado do servidor ({(int)response.StatusCode}).");
+        }
+
+        private sealed record NestErrorBody(string? Message);
     }
 }
