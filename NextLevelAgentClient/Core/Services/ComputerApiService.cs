@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -107,6 +108,41 @@ namespace NextLevelAgentClient.Core.Services
             response.EnsureSuccessStatusCode();
             PixPaymentStatus? status = await response.Content.ReadFromJsonAsync<PixPaymentStatus>(JsonOptions);
             return status ?? throw new InvalidOperationException("Resposta vazia do backend ao consultar pagamento.");
+        }
+
+        public async Task<CustomerLoginResult> LoginCustomerAsync(string username, string password)
+        {
+            var payload = new { username, password };
+            using HttpResponseMessage response = await _http.PostAsJsonAsync("auth/customer/login", payload, JsonOptions);
+            response.EnsureSuccessStatusCode();
+            CustomerLoginResult? result = await response.Content.ReadFromJsonAsync<CustomerLoginResult>(JsonOptions);
+            return result ?? throw new InvalidOperationException("Resposta vazia do backend ao fazer login.");
+        }
+
+        public async Task<StartSessionResult> StartSessionForCustomerAsync(string computerUuid, string apiKey, string customerAccessToken)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"machines/{computerUuid}/sessions/start-for-customer");
+            request.Headers.Add("X-Api-Key", apiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
+
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            StartSessionResult? result = await response.Content.ReadFromJsonAsync<StartSessionResult>(JsonOptions);
+            return result ?? throw new InvalidOperationException("Resposta vazia do backend ao iniciar sessão.");
+        }
+
+        public async Task<ChangePasswordResult> ChangeCustomerPasswordAsync(string customerAccessToken, string newPassword)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "auth/customer/change-password")
+            {
+                Content = JsonContent.Create(new { newPassword }, options: JsonOptions)
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", customerAccessToken);
+
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            ChangePasswordResult? result = await response.Content.ReadFromJsonAsync<ChangePasswordResult>(JsonOptions);
+            return result ?? new ChangePasswordResult(true, null);
         }
     }
 }

@@ -23,6 +23,7 @@ namespace NextLevelAgentClient
         private string? _apiKey;
         private int? _machineNumber;
         private string? _currentPaymentId;
+        private string? _pendingCustomerToken;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
@@ -106,6 +107,7 @@ namespace NextLevelAgentClient
                 case "buyTime": _session.ChangeState(MachineState.TimeSelection); break;
                 case "login": _session.ChangeState(MachineState.Login); break;
                 case "loginRequest": HandleLoginRequest(msg.Username, msg.Password); break;
+                case "changePasswordRequest": HandleChangePasswordRequest(msg.NewPassword, msg.ConfirmPassword); break;
                 case "back": HandleBack(); break;
                 case "selectTime": HandleSelectTime(msg); break;
             }
@@ -139,15 +141,84 @@ namespace NextLevelAgentClient
             }
         }
 
-        private void HandleLoginRequest(string? username, string? password)
+        private async void HandleLoginRequest(string? username, string? password)
         {
-            if (username == "admin" && password == "admin")
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
-                _session.ConfirmLogin();
+                ShowAlert("error", "Erro de Login", "Informe usuário e senha.");
+                return;
             }
-            else
+
+            try
             {
-                ShowAlert("error", "Erro de Login", "Credenciais inválidas. Tente novamente.");
+                CustomerLoginResult login = await _apiService.LoginCustomerAsync(username, password);
+
+                if (login.Customer.MustChangePassword)
+                {
+                    _pendingCustomerToken = login.AccessToken;
+                    _session.ChangeState(MachineState.ChangePassword);
+                    return;
+                }
+
+                await StartCustomerSessionAsync(login.AccessToken);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro de Login", $"Não foi possível entrar: {ex.Message}");
+            }
+        }
+
+        private async void HandleChangePasswordRequest(string? newPassword, string? confirmPassword)
+        {
+            if (string.IsNullOrEmpty(_pendingCustomerToken))
+            {
+                ShowAlert("error", "Sessão expirada", "Faça login novamente.");
+                _session.ChangeState(MachineState.Login);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+            {
+                ShowAlert("error", "Senha inválida", "A nova senha precisa ter pelo menos 6 caracteres.");
+                return;
+            }
+
+            if (newPassword != confirmPassword)
+            {
+                ShowAlert("error", "Senhas não conferem", "A confirmação precisa ser igual à nova senha.");
+                return;
+            }
+
+            try
+            {
+                ChangePasswordResult result = await _apiService.ChangeCustomerPasswordAsync(_pendingCustomerToken, newPassword);
+                string token = result.AccessToken ?? _pendingCustomerToken;
+                _pendingCustomerToken = null;
+
+                await StartCustomerSessionAsync(token);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro ao trocar senha", $"Não foi possível definir a nova senha: {ex.Message}");
+            }
+        }
+
+        private async Task StartCustomerSessionAsync(string customerAccessToken)
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível iniciar a sessão: máquina não está sincronizada com o servidor.");
+                return;
+            }
+
+            try
+            {
+                StartSessionResult session = await _apiService.StartSessionForCustomerAsync(_computerUuid, _apiKey, customerAccessToken);
+                _session.ConfirmLogin(session.AllocatedSeconds);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro ao iniciar sessão", $"Não foi possível iniciar a sessão: {ex.Message}");
             }
         }
 
@@ -159,7 +230,10 @@ namespace NextLevelAgentClient
                 _currentPaymentId = null;
             }
             else
+            {
+                _pendingCustomerToken = null;
                 _session.ChangeState(MachineState.InitialBlocked);
+            }
         }
 
         private async Task SynchronizeHardwareAsync()
@@ -514,6 +588,8 @@ namespace NextLevelAgentClient
             public int Minutes { get; set; }
             public string? Kind { get; set; }
             public string? OptionId { get; set; }
+            public string? NewPassword { get; set; }
+            public string? ConfirmPassword { get; set; }
         }
     }
 }

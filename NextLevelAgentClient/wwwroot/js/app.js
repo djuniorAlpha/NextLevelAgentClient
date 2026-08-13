@@ -6,6 +6,7 @@
     TimeSelection: document.getElementById("panel-time"),
     WaitingForPix: document.getElementById("panel-pix"),
     Login: document.getElementById("panel-login"),
+    ChangePassword: document.getElementById("panel-change-password"),
   };
 
   const btnBack = document.getElementById("btnBack");
@@ -231,6 +232,13 @@
     send("loginRequest", {
       username: document.getElementById("txtUsername").value,
       password: document.getElementById("txtPassword").value,
+    });
+  });
+
+  document.getElementById("btnChangePasswordRequest").addEventListener("click", () => {
+    send("changePasswordRequest", {
+      newPassword: document.getElementById("txtNewPassword").value,
+      confirmPassword: document.getElementById("txtConfirmPassword").value,
     });
   });
 })();

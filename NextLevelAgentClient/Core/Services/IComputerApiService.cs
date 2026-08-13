@@ -45,5 +45,25 @@ namespace NextLevelAgentClient.Core.Services
         /// Fallback poll for a payment's current status, in case the WebSocket notification is missed.
         /// </summary>
         Task<PixPaymentStatus> GetPaymentStatusAsync(string apiKey, string paymentId);
+
+        /// <summary>
+        /// Logs a customer in (username/password), returning a token to start a session with.
+        /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
+        /// </summary>
+        Task<CustomerLoginResult> LoginCustomerAsync(string username, string password);
+
+        /// <summary>
+        /// Starts a session for the logged-in customer; the backend decides whether it draws
+        /// from their subscription or wallet balance.
+        /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
+        /// </summary>
+        Task<StartSessionResult> StartSessionForCustomerAsync(string computerUuid, string apiKey, string customerAccessToken);
+
+        /// <summary>
+        /// Sets a definitive password when the customer's current one is temporary
+        /// (Customer.mustChangePassword == true).
+        /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
+        /// </summary>
+        Task<ChangePasswordResult> ChangeCustomerPasswordAsync(string customerAccessToken, string newPassword);
     }
 }
