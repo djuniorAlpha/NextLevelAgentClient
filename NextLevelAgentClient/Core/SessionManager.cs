@@ -61,6 +61,18 @@ namespace NextLevelAgentClient.Core
             ChangeState(MachineState.InitialBlocked);
         }
 
+        /// <summary>
+        /// Libera a estação sem cobrança e sem tempo determinado (force-unlock do admin) -
+        /// fica em sessão ativa "aberta" até o admin bloquear de novo.
+        /// </summary>
+        public void ForceUnlock()
+        {
+            _pixTimer.Stop();
+            _sessionTimer.Stop();
+            RemainingSessionTime = 0;
+            ChangeState(MachineState.ActiveSession);
+        }
+
         public void ConfirmPixPayment()
         {
             _pixTimer.Stop();

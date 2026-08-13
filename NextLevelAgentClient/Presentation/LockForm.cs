@@ -62,7 +62,16 @@ namespace NextLevelAgentClient
             string webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
             core.SetVirtualHostNameToFolderMapping("appassets", webRoot, CoreWebView2HostResourceAccessKind.Allow);
             core.WebMessageReceived += OnWebMessageReceived;
+
+            // Navigate() não espera a página carregar: sem isso, mensagens postadas logo em seguida
+            // (ex.: machineNumber) podem chegar antes do app.js registrar o listener e se perder.
+            var navigationCompleted = new TaskCompletionSource();
+            void OnNavigationCompleted(object? s, CoreWebView2NavigationCompletedEventArgs e) => navigationCompleted.TrySetResult();
+            core.NavigationCompleted += OnNavigationCompleted;
+
             core.Navigate("https://appassets/index.html");
+            await navigationCompleted.Task;
+            core.NavigationCompleted -= OnNavigationCompleted;
         }
 
         private void PostToJs(object payload)
@@ -280,6 +289,7 @@ namespace NextLevelAgentClient
             {
                 _realtimeClient = new RealtimeClient(AppConfig.Current.BackendBaseUrl, _apiKey);
                 _realtimeClient.OnPaymentConfirmed += HandlePaymentConfirmedFromSocket;
+                _realtimeClient.OnForceAction += HandleForceActionFromSocket;
                 await _realtimeClient.ConnectAsync();
             }
             catch (Exception ex)
@@ -300,6 +310,41 @@ namespace NextLevelAgentClient
             if (_session.CurrentState != MachineState.WaitingForPix) return;
             _currentPaymentId = null;
             _session.ConfirmPixPayment();
+        }
+
+        // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
+        private void HandleForceActionFromSocket(string action)
+        {
+            this.BeginInvoke(new MethodInvoker(() => HandleForceAction(action)));
+        }
+
+        private void HandleForceAction(string action)
+        {
+            switch (action)
+            {
+                case "lock":
+                    _currentPaymentId = null;
+                    _session.CancelOperation();
+                    trayIcon?.Visible = false;
+                    ConfigureLockScreen();
+                    this.Show();
+                    ShowAlert("warning", "Bloqueado", "Esta máquina foi bloqueada pelo atendente.");
+                    break;
+                case "unlock":
+                    _currentPaymentId = null;
+                    _session.ForceUnlock();
+                    break;
+                case "shutdown":
+                    try
+                    {
+                        Process.Start("shutdown", "/s /t 0 /f");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Falha ao desligar a máquina: {ex.Message}");
+                    }
+                    break;
+            }
         }
 
         // Fallback caso o WebSocket falhe: consulta o status a cada 5s enquanto aguarda o Pix.
