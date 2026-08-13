@@ -258,7 +258,7 @@ namespace NextLevelAgentClient
         {
             if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey)) return;
 
-            _heartbeatTimer ??= new System.Windows.Forms.Timer { Interval = 30_000 };
+            _heartbeatTimer ??= new System.Windows.Forms.Timer { Interval = 10_000 };
             _heartbeatTimer.Tick -= OnHeartbeatTick;
             _heartbeatTimer.Tick += OnHeartbeatTick;
             _heartbeatTimer.Start();
