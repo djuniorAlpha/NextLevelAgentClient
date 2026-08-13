@@ -21,7 +21,8 @@ namespace NextLevelAgentClient.Core.Services
 
         /// <summary>
         /// Sends a periodic status signal to the backend to maintain the machine connection live.
+        /// Requires the API key issued to this machine at registration time.
         /// </summary>
-        Task<bool> SendHeartbeatAsync(string computerUuid, string currentStatus);
+        Task<bool> SendHeartbeatAsync(string computerUuid, string apiKey, string currentStatus);
     }
 }

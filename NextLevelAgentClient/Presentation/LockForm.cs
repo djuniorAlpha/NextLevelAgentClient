@@ -4,6 +4,7 @@ using Microsoft.Web.WebView2.WinForms;
 using NextLevelAgentClient.Core;
 using NextLevelAgentClient.Core.Services;
 using NextLevelAgentClient.Infrastructure;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Text.Json;
@@ -19,17 +20,19 @@ namespace NextLevelAgentClient
 
         private bool _allowClose = false;
         private string _computerUuid = string.Empty;
+        private string? _apiKey;
         private int? _machineNumber;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
+        private System.Windows.Forms.Timer? _heartbeatTimer;
 
         public LockForm()
         {
             InitializeComponent();
 
             _session = new SessionManager();
-            _apiService = new MockComputerApiService(AppConfig.Current.BackendBaseUrl);
+            _apiService = new ComputerApiService(AppConfig.Current.BackendBaseUrl);
 
             BindSessionEvents();
 
@@ -122,30 +125,59 @@ namespace NextLevelAgentClient
         {
             PostToJs(new { type = "status", text = "SINCRONIZANDO COM O SERVIDOR...", color = "warning" });
 
+            string macAddress = GetLocalMacAddress();
+
             try
             {
-                string macAddress = GetLocalMacAddress();
-                string hostname = Dns.GetHostName();
-                string ipAddress = GetLocalIpAddress();
+                MachineCredentials? stored = MachineCredentialsStore.Load();
 
-                MachineRegistration? registration = await _apiService.GetRegistrationAsync(macAddress);
-
-                if (registration == null)
+                if (stored != null && stored.MacAddress == macAddress)
                 {
-                    PostToJs(new { type = "status", text = "HARDWARE NÃO ENCONTRADO. REGISTRANDO...", color = "warning" });
-                    registration = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
-                    PostToJs(new { type = "status", text = "REGISTRO CONCLUÍDO!", color = "success" });
+                    _computerUuid = stored.ComputerUuid;
+                    _apiKey = stored.ApiKey;
+                    _machineNumber = stored.MachineNumber;
+
+                    PostToJs(new { type = "status", text = "MÁQUINA VERIFICADA", color = "success" });
                     await Task.Delay(1000);
                 }
                 else
                 {
-                    PostToJs(new { type = "status", text = "MÁQUINA VERIFICADA", color = "success" });
-                    await Task.Delay(1000);
+                    string hostname = Dns.GetHostName();
+                    string ipAddress = GetLocalIpAddress();
+
+                    MachineRegistration? registration = await _apiService.GetRegistrationAsync(macAddress);
+
+                    if (registration == null)
+                    {
+                        PostToJs(new { type = "status", text = "HARDWARE NÃO ENCONTRADO. REGISTRANDO...", color = "warning" });
+                        registration = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
+
+                        if (string.IsNullOrEmpty(registration.ApiKey))
+                            throw new InvalidOperationException("Backend não retornou a chave de API no registro.");
+
+                        _apiKey = registration.ApiKey;
+                        MachineCredentialsStore.Save(new MachineCredentials(registration.ComputerUuid, registration.ApiKey, registration.MachineNumber, macAddress));
+
+                        PostToJs(new { type = "status", text = "REGISTRO CONCLUÍDO!", color = "success" });
+                        await Task.Delay(1000);
+                    }
+                    else
+                    {
+                        // Já existe na base do backend, mas sem chave local (ex.: reinstalação do Windows).
+                        // Sem endpoint pra reemitir a chave, a máquina fica identificada mas sem heartbeat autenticado.
+                        _computerUuid = registration.ComputerUuid;
+                        _machineNumber = registration.MachineNumber;
+                        PostToJs(new { type = "machineNumber", number = _machineNumber });
+                        ShowAlert("error", "Credenciais ausentes", "Esta máquina já está registrada no servidor, mas a chave de acesso local não foi encontrada. Contate o administrador para reemitir a chave.");
+                        return;
+                    }
+
+                    _computerUuid = registration.ComputerUuid;
+                    _machineNumber = registration.MachineNumber;
                 }
 
-                _computerUuid = registration.ComputerUuid;
-                _machineNumber = registration.MachineNumber;
                 PostToJs(new { type = "machineNumber", number = _machineNumber });
+                StartHeartbeat();
             }
             catch (Exception ex)
             {
@@ -157,6 +189,33 @@ namespace NextLevelAgentClient
                 PostToJs(new { type = "status", text = "ESTA MÁQUINA ESTÁ BLOQUEADA", color = "danger" });
             }
         }
+
+        private void StartHeartbeat()
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey)) return;
+
+            _heartbeatTimer ??= new System.Windows.Forms.Timer { Interval = 30_000 };
+            _heartbeatTimer.Tick -= OnHeartbeatTick;
+            _heartbeatTimer.Tick += OnHeartbeatTick;
+            _heartbeatTimer.Start();
+        }
+
+        private async void OnHeartbeatTick(object? sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey)) return;
+
+            string status = MapStateToBackendStatus(_session.CurrentState);
+            bool ok = await _apiService.SendHeartbeatAsync(_computerUuid, _apiKey, status);
+            if (!ok) Debug.WriteLine("Heartbeat falhou.");
+        }
+
+        private static string MapStateToBackendStatus(MachineState state) => state switch
+        {
+            MachineState.TimeSelection => "time_selection",
+            MachineState.WaitingForPix => "waiting_pix",
+            MachineState.ActiveSession => "active",
+            _ => "locked",
+        };
 
         // Helper method to capture local network IP configuration
         private string GetLocalIpAddress()
@@ -255,6 +314,7 @@ namespace NextLevelAgentClient
         {
             _allowClose = true;
             _session.CancelOperation();
+            _heartbeatTimer?.Stop();
             if (trayIcon != null) trayIcon?.Visible = false;
             KeyboardHook.Stop();
             RegistryManager.UnlockManagerTask();
