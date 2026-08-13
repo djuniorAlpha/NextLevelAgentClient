@@ -61,5 +61,21 @@ namespace NextLevelAgentClient.Core.Services
                 return false;
             }
         }
+
+        public async Task<IReadOnlyList<TimePackageDto>> GetTimePackagesAsync()
+        {
+            using HttpResponseMessage response = await _http.GetAsync("time-packages");
+            response.EnsureSuccessStatusCode();
+            List<TimePackageDto>? packages = await response.Content.ReadFromJsonAsync<List<TimePackageDto>>(JsonOptions);
+            return packages ?? [];
+        }
+
+        public async Task<IReadOnlyList<HourlyRateDto>> GetHourlyRatesAsync()
+        {
+            using HttpResponseMessage response = await _http.GetAsync("hourly-rates");
+            response.EnsureSuccessStatusCode();
+            List<HourlyRateDto>? rates = await response.Content.ReadFromJsonAsync<List<HourlyRateDto>>(JsonOptions);
+            return rates ?? [];
+        }
     }
 }

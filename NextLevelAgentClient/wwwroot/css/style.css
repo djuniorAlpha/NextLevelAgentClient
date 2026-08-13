@@ -332,6 +332,68 @@ body {
   color: transparent;
 }
 
+.hourly-box {
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hourly-box.active {
+  display: flex;
+}
+
+.hourly-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.btn-stepper {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--chip-bg);
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn-stepper:hover {
+  border-color: var(--accent-4);
+  background: rgba(0, 173, 255, 0.08);
+}
+
+.hourly-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.hourly-hours {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.hourly-price {
+  font-size: 14px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent-4));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+#timeOptionsEmpty {
+  display: none;
+  text-align: center;
+}
+
 .pix-box {
   display: flex;
   align-items: center;

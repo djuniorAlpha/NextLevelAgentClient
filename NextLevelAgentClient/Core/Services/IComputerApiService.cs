@@ -24,5 +24,15 @@ namespace NextLevelAgentClient.Core.Services
         /// Requires the API key issued to this machine at registration time.
         /// </summary>
         Task<bool> SendHeartbeatAsync(string computerUuid, string apiKey, string currentStatus);
+
+        /// <summary>
+        /// Lists the active closed time packages configured by the admin (e.g. "1 hora - R$5,00").
+        /// </summary>
+        Task<IReadOnlyList<TimePackageDto>> GetTimePackagesAsync();
+
+        /// <summary>
+        /// Lists the active running-hour rates configured by the admin (free-form time purchase).
+        /// </summary>
+        Task<IReadOnlyList<HourlyRateDto>> GetHourlyRatesAsync();
     }
 }

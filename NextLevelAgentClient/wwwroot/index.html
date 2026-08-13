@@ -42,13 +42,24 @@
 
     <section id="panel-time" class="panel">
       <h2 class="subtitle">Selecione o tempo de uso desejado</h2>
-      <div id="timeOptions" class="time-grid">
-        <button class="time-card" type="button" data-minutes="1">
-          <span class="time-card-duration">1 min</span>
-          <span class="time-card-label">Teste</span>
-          <span class="time-card-price">R$ 0,10</span>
-        </button>
+      <div id="timeOptions" class="time-grid"></div>
+
+      <div id="hourlyRateBox" class="hourly-box">
+        <h2 class="subtitle" id="hourlyRateLabel">Tempo livre</h2>
+        <div class="hourly-row">
+          <button id="hourlyDecrease" class="btn-stepper" type="button">&minus;</button>
+          <div class="hourly-copy">
+            <span id="hourlyHours" class="hourly-hours">1h</span>
+            <span id="hourlyPrice" class="hourly-price">R$ 0,00</span>
+          </div>
+          <button id="hourlyIncrease" class="btn-stepper" type="button">+</button>
+        </div>
+        <button id="btnConfirmHourly" class="btn btn-primary" type="button">Confirmar</button>
       </div>
+
+      <p id="timeOptionsEmpty" class="instructions">
+        Nenhuma opção de tempo disponível no momento. Fale com o atendente.
+      </p>
     </section>
 
     <section id="panel-pix" class="panel">

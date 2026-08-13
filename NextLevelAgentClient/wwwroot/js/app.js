@@ -21,6 +21,20 @@
   const alertOk = document.getElementById("alertOk");
   const envVersion = document.getElementById("envVersion");
 
+  const timeOptionsEl = document.getElementById("timeOptions");
+  const timeOptionsEmptyEl = document.getElementById("timeOptionsEmpty");
+  const hourlyRateBoxEl = document.getElementById("hourlyRateBox");
+  const hourlyRateLabelEl = document.getElementById("hourlyRateLabel");
+  const hourlyHoursEl = document.getElementById("hourlyHours");
+  const hourlyPriceEl = document.getElementById("hourlyPrice");
+  const hourlyDecreaseBtn = document.getElementById("hourlyDecrease");
+  const hourlyIncreaseBtn = document.getElementById("hourlyIncrease");
+  const btnConfirmHourly = document.getElementById("btnConfirmHourly");
+
+  const MAX_HOURLY_HOURS = 12;
+  let selectedHourlyRate = null;
+  let hourlyHours = 1;
+
   const statusClassByColor = {
     danger: "status-danger",
     success: "status-success",
@@ -61,6 +75,69 @@
     envVersion.classList.toggle("env-dev", value === "DEV");
   }
 
+  function formatCurrency(cents) {
+    return `R$ ${(cents / 100).toFixed(2).replace(".", ",")}`;
+  }
+
+  function renderTimePackages(packages) {
+    timeOptionsEl.innerHTML = "";
+    packages.forEach((pkg) => {
+      const btn = document.createElement("button");
+      btn.className = "time-card";
+      btn.type = "button";
+      btn.dataset.minutes = pkg.minutes;
+      btn.innerHTML = `
+        <span class="time-card-duration">${pkg.minutes} min</span>
+        <span class="time-card-label">${pkg.label}</span>
+        <span class="time-card-price">${formatCurrency(pkg.priceCents)}</span>
+      `;
+      btn.addEventListener("click", () => send("selectTime", { minutes: pkg.minutes }));
+      timeOptionsEl.appendChild(btn);
+    });
+  }
+
+  function updateHourlyDisplay() {
+    if (!selectedHourlyRate) return;
+    hourlyHoursEl.textContent = `${hourlyHours}h`;
+    hourlyPriceEl.textContent = formatCurrency(selectedHourlyRate.ratePerHourCents * hourlyHours);
+  }
+
+  function renderHourlyRate(hourlyRates) {
+    selectedHourlyRate = hourlyRates.length > 0 ? hourlyRates[0] : null;
+    hourlyRateBoxEl.classList.toggle("active", Boolean(selectedHourlyRate));
+
+    if (selectedHourlyRate) {
+      hourlyHours = 1;
+      hourlyRateLabelEl.textContent = selectedHourlyRate.label;
+      updateHourlyDisplay();
+    }
+  }
+
+  function renderPricingOptions(packages, hourlyRates) {
+    renderTimePackages(packages);
+    renderHourlyRate(hourlyRates);
+    timeOptionsEmptyEl.style.display = packages.length === 0 && hourlyRates.length === 0 ? "block" : "none";
+  }
+
+  hourlyDecreaseBtn.addEventListener("click", () => {
+    if (hourlyHours > 1) {
+      hourlyHours--;
+      updateHourlyDisplay();
+    }
+  });
+
+  hourlyIncreaseBtn.addEventListener("click", () => {
+    if (hourlyHours < MAX_HOURLY_HOURS) {
+      hourlyHours++;
+      updateHourlyDisplay();
+    }
+  });
+
+  btnConfirmHourly.addEventListener("click", () => {
+    if (!selectedHourlyRate) return;
+    send("selectTime", { minutes: hourlyHours * 60 });
+  });
+
   function showAlert(alertType, title, message) {
     alertIcon.textContent = alertIconByType[alertType] ?? alertIconByType.info;
     alertIcon.className = `alert-icon alert-icon-${alertType}`;
@@ -93,6 +170,9 @@
         case "alert":
           showAlert(msg.alertType, msg.title, msg.text);
           break;
+        case "pricingOptions":
+          renderPricingOptions(msg.packages ?? [], msg.hourlyRates ?? []);
+          break;
       }
     });
   }
@@ -101,12 +181,6 @@
   document.getElementById("btnLogin").addEventListener("click", () => send("login"));
   document.getElementById("btnBack").addEventListener("click", () => send("back"));
   document.getElementById("btnSimulatePayment").addEventListener("click", () => send("simulatePayment"));
-
-  document.querySelectorAll(".time-card").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      send("selectTime", { minutes: parseInt(btn.dataset.minutes, 10) });
-    });
-  });
 
   document.getElementById("btnLoginRequest").addEventListener("click", () => {
     send("loginRequest", {

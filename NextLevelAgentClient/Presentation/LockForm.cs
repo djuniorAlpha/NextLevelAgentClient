@@ -178,6 +178,7 @@ namespace NextLevelAgentClient
 
                 PostToJs(new { type = "machineNumber", number = _machineNumber });
                 StartHeartbeat();
+                await LoadPricingOptionsAsync();
             }
             catch (Exception ex)
             {
@@ -187,6 +188,27 @@ namespace NextLevelAgentClient
             finally
             {
                 PostToJs(new { type = "status", text = "ESTA MÁQUINA ESTÁ BLOQUEADA", color = "danger" });
+            }
+        }
+
+        private async Task LoadPricingOptionsAsync()
+        {
+            try
+            {
+                IReadOnlyList<TimePackageDto> packages = await _apiService.GetTimePackagesAsync();
+                IReadOnlyList<HourlyRateDto> hourlyRates = await _apiService.GetHourlyRatesAsync();
+
+                PostToJs(new
+                {
+                    type = "pricingOptions",
+                    packages = packages.Select(p => new { id = p.Id, label = p.Label, minutes = p.Minutes, priceCents = p.PriceCents }),
+                    hourlyRates = hourlyRates.Select(r => new { id = r.Id, label = r.Label, ratePerHourCents = r.RatePerHourCents }),
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao carregar pacotes/tarifas: {ex.Message}");
+                PostToJs(new { type = "pricingOptions", packages = Array.Empty<object>(), hourlyRates = Array.Empty<object>() });
             }
         }
 
