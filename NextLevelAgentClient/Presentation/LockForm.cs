@@ -22,10 +22,12 @@ namespace NextLevelAgentClient
         private string _computerUuid = string.Empty;
         private string? _apiKey;
         private int? _machineNumber;
+        private string? _currentPaymentId;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
         private System.Windows.Forms.Timer? _heartbeatTimer;
+        private RealtimeClient? _realtimeClient;
 
         public LockForm()
         {
@@ -96,8 +98,35 @@ namespace NextLevelAgentClient
                 case "login": _session.ChangeState(MachineState.Login); break;
                 case "loginRequest": HandleLoginRequest(msg.Username, msg.Password); break;
                 case "back": HandleBack(); break;
-                case "selectTime": _session.StartPixExpectancy(msg.Minutes); break;
-                case "simulatePayment": _session.ConfirmPixPayment(); break;
+                case "selectTime": HandleSelectTime(msg); break;
+            }
+        }
+
+        private async void HandleSelectTime(WebMessage msg)
+        {
+            _session.StartPixExpectancy(msg.Minutes);
+
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível gerar a cobrança: máquina não está sincronizada com o servidor.");
+                _session.CancelOperation();
+                return;
+            }
+
+            try
+            {
+                string? timePackageId = msg.Kind == "package" ? msg.OptionId : null;
+                string? hourlyRateId = msg.Kind == "hourly" ? msg.OptionId : null;
+
+                PixPaymentResult result = await _apiService.CreatePixPaymentAsync(_computerUuid, _apiKey, timePackageId, hourlyRateId, msg.Minutes);
+                _currentPaymentId = result.PaymentId;
+
+                PostToJs(new { type = "pixData", qrCodeBase64 = result.QrCodeBase64, qrCodeText = result.QrCodeText, amountCents = result.AmountCents });
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Falha ao gerar cobrança", $"Não foi possível gerar a cobrança Pix: {ex.Message}");
+                _session.CancelOperation();
             }
         }
 
@@ -116,7 +145,10 @@ namespace NextLevelAgentClient
         private void HandleBack()
         {
             if (_session.CurrentState == MachineState.WaitingForPix)
+            {
                 _session.CancelOperation();
+                _currentPaymentId = null;
+            }
             else
                 _session.ChangeState(MachineState.InitialBlocked);
         }
@@ -179,6 +211,7 @@ namespace NextLevelAgentClient
                 PostToJs(new { type = "machineNumber", number = _machineNumber });
                 StartHeartbeat();
                 await LoadPricingOptionsAsync();
+                await ConnectRealtimeAsync();
             }
             catch (Exception ex)
             {
@@ -239,6 +272,54 @@ namespace NextLevelAgentClient
             _ => "locked",
         };
 
+        private async Task ConnectRealtimeAsync()
+        {
+            if (string.IsNullOrEmpty(_apiKey)) return;
+
+            try
+            {
+                _realtimeClient = new RealtimeClient(AppConfig.Current.BackendBaseUrl, _apiKey);
+                _realtimeClient.OnPaymentConfirmed += HandlePaymentConfirmedFromSocket;
+                await _realtimeClient.ConnectAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao conectar ao WebSocket de tempo real: {ex.Message}");
+            }
+        }
+
+        // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
+        private void HandlePaymentConfirmedFromSocket(string paymentId)
+        {
+            if (paymentId != _currentPaymentId) return;
+            this.BeginInvoke(new MethodInvoker(CompletePixPayment));
+        }
+
+        private void CompletePixPayment()
+        {
+            if (_session.CurrentState != MachineState.WaitingForPix) return;
+            _currentPaymentId = null;
+            _session.ConfirmPixPayment();
+        }
+
+        // Fallback caso o WebSocket falhe: consulta o status a cada 5s enquanto aguarda o Pix.
+        private async void HandlePixTickPoll(TimeSpan remaining)
+        {
+            if (string.IsNullOrEmpty(_currentPaymentId) || string.IsNullOrEmpty(_apiKey)) return;
+            if ((int)remaining.TotalSeconds % 5 != 0) return;
+
+            try
+            {
+                PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
+                if (status.Status == "approved")
+                    CompletePixPayment();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao consultar status do pagamento: {ex.Message}");
+            }
+        }
+
         // Helper method to capture local network IP configuration
         private string GetLocalIpAddress()
         {
@@ -274,9 +355,14 @@ namespace NextLevelAgentClient
         {
             _session.OnStateChanged += HandleStateChanged;
             _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"{time:mm\\:ss}" });
+            _session.OnPixTick += HandlePixTickPoll;
             _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
-            _session.OnPixExpired += () => ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");
+            _session.OnPixExpired += () =>
+            {
+                _currentPaymentId = null;
+                ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");
+            };
             _session.OnSessionEnded += HandleSessionEnded;
 
             _session.OnSessionTick += (time) =>
@@ -337,6 +423,7 @@ namespace NextLevelAgentClient
             _allowClose = true;
             _session.CancelOperation();
             _heartbeatTimer?.Stop();
+            if (_realtimeClient != null) _ = _realtimeClient.DisposeAsync();
             if (trayIcon != null) trayIcon?.Visible = false;
             KeyboardHook.Stop();
             RegistryManager.UnlockManagerTask();
@@ -380,6 +467,8 @@ namespace NextLevelAgentClient
             public string? Username { get; set; }
             public string? Password { get; set; }
             public int Minutes { get; set; }
+            public string? Kind { get; set; }
+            public string? OptionId { get; set; }
         }
     }
 }

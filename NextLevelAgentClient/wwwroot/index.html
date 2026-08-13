@@ -64,7 +64,12 @@
 
     <section id="panel-pix" class="panel">
       <h2 class="subtitle">Escaneie o QR Code para pagar</h2>
-      <div class="pix-box">[ QR CODE PIX ]</div>
+      <div id="pixQrBox" class="pix-box">
+        <span id="pixQrPlaceholder">Gerando QR Code...</span>
+        <img id="pixQrImage" class="pix-qr-image" alt="QR Code Pix" />
+      </div>
+      <div id="pixAmount" class="pix-amount"></div>
+      <button id="btnCopyPixCode" class="btn btn-outline" type="button">📋 Copiar código Pix</button>
       <div class="timer-row">
         <span class="timer-icon">⏱</span>
         <div class="timer-copy">
@@ -72,7 +77,7 @@
           <span id="pixCounter" class="timer-value">05:00</span>
         </div>
       </div>
-      <button id="btnSimulatePayment" class="btn btn-primary" type="button">🟢 Simular: Pix pago</button>
+      <p class="instructions">O pagamento é confirmado automaticamente assim que o Pix cair.</p>
     </section>
 
     <section id="panel-login" class="panel">

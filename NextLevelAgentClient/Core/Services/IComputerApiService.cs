@@ -34,5 +34,16 @@ namespace NextLevelAgentClient.Core.Services
         /// Lists the active running-hour rates configured by the admin (free-form time purchase).
         /// </summary>
         Task<IReadOnlyList<HourlyRateDto>> GetHourlyRatesAsync();
+
+        /// <summary>
+        /// Creates a real Pix charge for either a closed time package or a running-hour rate.
+        /// Exactly one of <paramref name="timePackageId"/>/<paramref name="hourlyRateId"/> must be set.
+        /// </summary>
+        Task<PixPaymentResult> CreatePixPaymentAsync(string computerUuid, string apiKey, string? timePackageId, string? hourlyRateId, int minutes);
+
+        /// <summary>
+        /// Fallback poll for a payment's current status, in case the WebSocket notification is missed.
+        /// </summary>
+        Task<PixPaymentStatus> GetPaymentStatusAsync(string apiKey, string paymentId);
     }
 }

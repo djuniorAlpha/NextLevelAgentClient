@@ -406,6 +406,25 @@ body {
   letter-spacing: 1px;
 }
 
+.pix-qr-image {
+  display: none;
+  width: 160px;
+  height: 160px;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+}
+
+.pix-amount {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+#btnCopyPixCode {
+  display: none;
+}
+
 .timer-row {
   display: flex;
   align-items: center;

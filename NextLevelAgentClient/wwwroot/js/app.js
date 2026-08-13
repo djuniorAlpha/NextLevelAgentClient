@@ -21,6 +21,11 @@
   const alertOk = document.getElementById("alertOk");
   const envVersion = document.getElementById("envVersion");
 
+  const pixQrPlaceholderEl = document.getElementById("pixQrPlaceholder");
+  const pixQrImageEl = document.getElementById("pixQrImage");
+  const pixAmountEl = document.getElementById("pixAmount");
+  const btnCopyPixCode = document.getElementById("btnCopyPixCode");
+
   const timeOptionsEl = document.getElementById("timeOptions");
   const timeOptionsEmptyEl = document.getElementById("timeOptionsEmpty");
   const hourlyRateBoxEl = document.getElementById("hourlyRateBox");
@@ -91,7 +96,7 @@
         <span class="time-card-label">${pkg.label}</span>
         <span class="time-card-price">${formatCurrency(pkg.priceCents)}</span>
       `;
-      btn.addEventListener("click", () => send("selectTime", { minutes: pkg.minutes }));
+      btn.addEventListener("click", () => send("selectTime", { minutes: pkg.minutes, kind: "package", optionId: pkg.id }));
       timeOptionsEl.appendChild(btn);
     });
   }
@@ -135,7 +140,44 @@
 
   btnConfirmHourly.addEventListener("click", () => {
     if (!selectedHourlyRate) return;
-    send("selectTime", { minutes: hourlyHours * 60 });
+    send("selectTime", { minutes: hourlyHours * 60, kind: "hourly", optionId: selectedHourlyRate.id });
+  });
+
+  function resetPixPanel() {
+    pixQrImageEl.style.display = "none";
+    pixQrImageEl.src = "";
+    pixQrPlaceholderEl.style.display = "block";
+    pixAmountEl.textContent = "";
+    btnCopyPixCode.style.display = "none";
+    btnCopyPixCode.textContent = "📋 Copiar código Pix";
+    delete btnCopyPixCode.dataset.pixCode;
+  }
+
+  function setPixData(qrCodeBase64, qrCodeText, amountCents) {
+    if (qrCodeBase64) {
+      pixQrImageEl.src = `data:image/png;base64,${qrCodeBase64}`;
+      pixQrImageEl.style.display = "block";
+      pixQrPlaceholderEl.style.display = "none";
+    }
+    if (typeof amountCents === "number") {
+      pixAmountEl.textContent = formatCurrency(amountCents);
+    }
+    if (qrCodeText) {
+      btnCopyPixCode.style.display = "block";
+      btnCopyPixCode.dataset.pixCode = qrCodeText;
+    }
+  }
+
+  btnCopyPixCode.addEventListener("click", async () => {
+    const code = btnCopyPixCode.dataset.pixCode;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      btnCopyPixCode.textContent = "✅ Copiado!";
+      setTimeout(() => { btnCopyPixCode.textContent = "📋 Copiar código Pix"; }, 2000);
+    } catch {
+      // Clipboard API pode não estar disponível; ignora silenciosamente.
+    }
   });
 
   function showAlert(alertType, title, message) {
@@ -153,6 +195,7 @@
       const msg = event.data;
       switch (msg.type) {
         case "state":
+          if (msg.state === "WaitingForPix") resetPixPanel();
           showState(msg.state);
           break;
         case "status":
@@ -173,6 +216,9 @@
         case "pricingOptions":
           renderPricingOptions(msg.packages ?? [], msg.hourlyRates ?? []);
           break;
+        case "pixData":
+          setPixData(msg.qrCodeBase64, msg.qrCodeText, msg.amountCents);
+          break;
       }
     });
   }
@@ -180,7 +226,6 @@
   document.getElementById("btnBuyTime").addEventListener("click", () => send("buyTime"));
   document.getElementById("btnLogin").addEventListener("click", () => send("login"));
   document.getElementById("btnBack").addEventListener("click", () => send("back"));
-  document.getElementById("btnSimulatePayment").addEventListener("click", () => send("simulatePayment"));
 
   document.getElementById("btnLoginRequest").addEventListener("click", () => {
     send("loginRequest", {

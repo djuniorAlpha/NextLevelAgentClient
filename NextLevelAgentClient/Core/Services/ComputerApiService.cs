@@ -77,5 +77,36 @@ namespace NextLevelAgentClient.Core.Services
             List<HourlyRateDto>? rates = await response.Content.ReadFromJsonAsync<List<HourlyRateDto>>(JsonOptions);
             return rates ?? [];
         }
+
+        public async Task<PixPaymentResult> CreatePixPaymentAsync(string computerUuid, string apiKey, string? timePackageId, string? hourlyRateId, int minutes)
+        {
+            object payload;
+            if (timePackageId != null)
+                payload = new { timePackageId };
+            else
+                payload = new { hourlyRateId, minutes };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"machines/{computerUuid}/payments/pix")
+            {
+                Content = JsonContent.Create(payload, options: JsonOptions)
+            };
+            request.Headers.Add("X-Api-Key", apiKey);
+
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            PixPaymentResult? result = await response.Content.ReadFromJsonAsync<PixPaymentResult>(JsonOptions);
+            return result ?? throw new InvalidOperationException("Resposta vazia do backend ao criar cobrança Pix.");
+        }
+
+        public async Task<PixPaymentStatus> GetPaymentStatusAsync(string apiKey, string paymentId)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"payments/{paymentId}");
+            request.Headers.Add("X-Api-Key", apiKey);
+
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            PixPaymentStatus? status = await response.Content.ReadFromJsonAsync<PixPaymentStatus>(JsonOptions);
+            return status ?? throw new InvalidOperationException("Resposta vazia do backend ao consultar pagamento.");
+        }
     }
 }
