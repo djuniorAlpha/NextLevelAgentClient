@@ -24,6 +24,8 @@ namespace NextLevelAgentClient
         private int? _machineNumber;
         private string? _currentPaymentId;
         private string? _pendingCustomerToken;
+        private string? _activeSessionId;
+        private int _activeSessionAllocatedSeconds;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
@@ -214,12 +216,29 @@ namespace NextLevelAgentClient
             try
             {
                 StartSessionResult session = await _apiService.StartSessionForCustomerAsync(_computerUuid, _apiKey, customerAccessToken);
+                _activeSessionId = session.SessionId;
+                _activeSessionAllocatedSeconds = session.AllocatedSeconds;
                 _session.ConfirmLogin(session.AllocatedSeconds);
             }
             catch (Exception ex)
             {
                 ShowAlert("error", "Erro ao iniciar sessão", $"Não foi possível iniciar a sessão: {ex.Message}");
             }
+        }
+
+        // Reporta ao backend quanto tempo foi de fato consumido numa sessão de cliente logado,
+        // pra descontar do saldo. Best-effort: não interrompe o fluxo se falhar.
+        private async Task ReportSessionEndIfNeededAsync()
+        {
+            if (string.IsNullOrEmpty(_activeSessionId) || string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+                return;
+
+            string sessionId = _activeSessionId;
+            int consumedSeconds = Math.Max(0, _activeSessionAllocatedSeconds - _session.RemainingSessionTime);
+            _activeSessionId = null;
+
+            bool ok = await _apiService.EndSessionAsync(_computerUuid, _apiKey, sessionId, consumedSeconds);
+            if (!ok) Debug.WriteLine("Falha ao reportar fim de sessão.");
         }
 
         private void HandleBack()
@@ -398,6 +417,7 @@ namespace NextLevelAgentClient
             {
                 case "lock":
                     _currentPaymentId = null;
+                    _ = ReportSessionEndIfNeededAsync();
                     _session.CancelOperation();
                     trayIcon?.Visible = false;
                     ConfigureLockScreen();
@@ -406,6 +426,7 @@ namespace NextLevelAgentClient
                     break;
                 case "unlock":
                     _currentPaymentId = null;
+                    _ = ReportSessionEndIfNeededAsync();
                     _session.ForceUnlock();
                     break;
                 case "shutdown":
@@ -505,6 +526,8 @@ namespace NextLevelAgentClient
 
         private void HandleSessionEnded()
         {
+            _ = ReportSessionEndIfNeededAsync();
+
             trayIcon?.Visible = false;
             ConfigureLockScreen();
             this.Show();
@@ -540,6 +563,7 @@ namespace NextLevelAgentClient
         private void HandleDeveloperExit()
         {
             _allowClose = true;
+            _ = ReportSessionEndIfNeededAsync();
             _session.CancelOperation();
             _heartbeatTimer?.Stop();
             if (_realtimeClient != null) _ = _realtimeClient.DisposeAsync();

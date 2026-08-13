@@ -65,5 +65,13 @@ namespace NextLevelAgentClient.Core.Services
         /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
         /// </summary>
         Task<ChangePasswordResult> ChangeCustomerPasswordAsync(string customerAccessToken, string newPassword);
+
+        /// <summary>
+        /// Reports how much of an allocated customer session was actually consumed, so the
+        /// backend can deduct it from the customer's balance. Best-effort: returns false on failure
+        /// instead of throwing, since this is a background/cleanup call.
+        /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
+        /// </summary>
+        Task<bool> EndSessionAsync(string computerUuid, string apiKey, string sessionId, int consumedSeconds);
     }
 }

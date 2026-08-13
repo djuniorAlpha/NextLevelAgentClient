@@ -37,6 +37,11 @@
   const hourlyIncreaseBtn = document.getElementById("hourlyIncrease");
   const btnConfirmHourly = document.getElementById("btnConfirmHourly");
 
+  const txtUsername = document.getElementById("txtUsername");
+  const txtPassword = document.getElementById("txtPassword");
+  const txtNewPassword = document.getElementById("txtNewPassword");
+  const txtConfirmPassword = document.getElementById("txtConfirmPassword");
+
   const MAX_HOURLY_HOURS = 12;
   let selectedHourlyRate = null;
   let hourlyHours = 1;
@@ -144,6 +149,13 @@
     send("selectTime", { minutes: hourlyHours * 60, kind: "hourly", optionId: selectedHourlyRate.id });
   });
 
+  function resetLoginForm() {
+    txtUsername.value = "";
+    txtPassword.value = "";
+    txtNewPassword.value = "";
+    txtConfirmPassword.value = "";
+  }
+
   function resetPixPanel() {
     pixQrImageEl.style.display = "none";
     pixQrImageEl.src = "";
@@ -197,6 +209,7 @@
       switch (msg.type) {
         case "state":
           if (msg.state === "WaitingForPix") resetPixPanel();
+          if (msg.state === "InitialBlocked") resetLoginForm();
           showState(msg.state);
           break;
         case "status":
@@ -230,15 +243,15 @@
 
   document.getElementById("btnLoginRequest").addEventListener("click", () => {
     send("loginRequest", {
-      username: document.getElementById("txtUsername").value,
-      password: document.getElementById("txtPassword").value,
+      username: txtUsername.value,
+      password: txtPassword.value,
     });
   });
 
   document.getElementById("btnChangePasswordRequest").addEventListener("click", () => {
     send("changePasswordRequest", {
-      newPassword: document.getElementById("txtNewPassword").value,
-      confirmPassword: document.getElementById("txtConfirmPassword").value,
+      newPassword: txtNewPassword.value,
+      confirmPassword: txtConfirmPassword.value,
     });
   });
 })();

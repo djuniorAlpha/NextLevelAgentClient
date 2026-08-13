@@ -144,5 +144,25 @@ namespace NextLevelAgentClient.Core.Services
             ChangePasswordResult? result = await response.Content.ReadFromJsonAsync<ChangePasswordResult>(JsonOptions);
             return result ?? new ChangePasswordResult(true, null);
         }
+
+        public async Task<bool> EndSessionAsync(string computerUuid, string apiKey, string sessionId, int consumedSeconds)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"machines/{computerUuid}/sessions/{sessionId}/end")
+                {
+                    Content = JsonContent.Create(new { consumedSeconds }, options: JsonOptions)
+                };
+                request.Headers.Add("X-Api-Key", apiKey);
+
+                using HttpResponseMessage response = await _http.SendAsync(request);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao reportar fim de sessão: {ex.Message}");
+                return false;
+            }
+        }
     }
 }
