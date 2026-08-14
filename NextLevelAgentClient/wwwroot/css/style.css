@@ -132,7 +132,7 @@ body {
 .divider {
   height: 1px;
   background: var(--divider);
-  margin: 0 -40px 22px;
+  margin: 15px -40px 22px;
 }
 
 .panel {
