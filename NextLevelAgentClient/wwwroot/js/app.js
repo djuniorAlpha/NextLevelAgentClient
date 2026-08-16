@@ -8,7 +8,6 @@
     Login: document.getElementById("panel-login"),
     ChangePassword: document.getElementById("panel-change-password"),
     RedeemToken: document.getElementById("panel-redeem-token"),
-    ActiveSession: document.getElementById("panel-active-session"),
   };
 
   const btnBack = document.getElementById("btnBack");
@@ -44,18 +43,6 @@
   const txtNewPassword = document.getElementById("txtNewPassword");
   const txtConfirmPassword = document.getElementById("txtConfirmPassword");
   const txtRedeemCode = document.getElementById("txtRedeemCode");
-
-  const sessionSourceEl = document.getElementById("sessionSource");
-  const sessionCounterEl = document.getElementById("sessionCounter");
-  const btnExtendSession = document.getElementById("btnExtendSession");
-  const btnLockSession = document.getElementById("btnLockSession");
-  const btnEndSession = document.getElementById("btnEndSession");
-  const btnMinimizeSession = document.getElementById("btnMinimizeSession");
-  const sessionLockOverlay = document.getElementById("sessionLockOverlay");
-  const btnUnlockSession = document.getElementById("btnUnlockSession");
-  const btnCancelExtend = document.getElementById("btnCancelExtend");
-  const panelActiveSession = panels.ActiveSession;
-  const panelPix = panels.WaitingForPix;
 
   const MAX_HOURLY_HOURS = 12;
   let selectedHourlyRate = null;
@@ -197,47 +184,6 @@
     }
   }
 
-  const sessionSourceLabels = {
-    subscription: "Assinatura",
-    balance: "Saldo",
-    pix: "Pix",
-    unlock: "Liberado pelo atendente",
-  };
-
-  const SESSION_WARNING_THRESHOLD_SECONDS = 300;
-
-  function formatHms(totalSeconds) {
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    const s = Math.floor(totalSeconds % 60);
-    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
-  }
-
-  function setSessionTick(text, seconds) {
-    sessionCounterEl.textContent = text;
-    sessionCounterEl.classList.toggle("timer-warning", typeof seconds === "number" && seconds > 0 && seconds <= SESSION_WARNING_THRESHOLD_SECONDS);
-  }
-
-  function setSessionInfo(source, remainingSeconds) {
-    sessionSourceEl.textContent = sessionSourceLabels[source] ?? source ?? "—";
-    if (typeof remainingSeconds === "number") setSessionTick(formatHms(remainingSeconds), remainingSeconds);
-  }
-
-  // A extensão de tempo reaproveita o #panel-pix sem passar pelo showState/mapa de panels,
-  // já que o MachineState continua ActiveSession durante todo o fluxo.
-  function showExtendPixView() {
-    resetPixPanel();
-    panelActiveSession?.classList.remove("active");
-    panelPix?.classList.add("active");
-    btnCancelExtend.style.display = "block";
-  }
-
-  function hideExtendPixView() {
-    panelPix?.classList.remove("active");
-    btnCancelExtend.style.display = "none";
-    showState("ActiveSession");
-  }
-
   btnCopyPixCode.addEventListener("click", async () => {
     const code = btnCopyPixCode.dataset.pixCode;
     if (!code) return;
@@ -290,26 +236,6 @@
         case "pixData":
           setPixData(msg.qrCodeBase64, msg.qrCodeText, msg.amountCents);
           break;
-        case "sessionInfo":
-          setSessionInfo(msg.source, msg.remainingSeconds);
-          break;
-        case "sessionTick":
-          setSessionTick(msg.text, msg.seconds);
-          break;
-        case "sessionLocked":
-          sessionLockOverlay.classList.add("active");
-          break;
-        case "sessionUnlocked":
-          sessionLockOverlay.classList.remove("active");
-          break;
-        case "sessionExtendPixData":
-          showExtendPixView();
-          setPixData(msg.qrCodeBase64, msg.qrCodeText, msg.amountCents);
-          break;
-        case "sessionExtended":
-          hideExtendPixView();
-          showAlert("success", "Tempo adicionado!", `Foram adicionados ${Math.round(msg.addedSeconds / 60)} minutos à sua sessão.`);
-          break;
       }
     });
   }
@@ -339,21 +265,5 @@
       newPassword: txtNewPassword.value,
       confirmPassword: txtConfirmPassword.value,
     });
-  });
-
-  btnEndSession.addEventListener("click", () => send("endSessionRequest"));
-  btnMinimizeSession.addEventListener("click", () => send("minimizeSessionRequest"));
-  btnLockSession.addEventListener("click", () => send("lockSessionRequest"));
-  btnUnlockSession.addEventListener("click", () => send("unlockSessionRequest"));
-  btnCancelExtend.addEventListener("click", () => send("cancelExtendSessionRequest"));
-
-  // Versão simplificada: sempre compra +1h pela tarifa horária já carregada em #panel-time,
-  // sem reabrir a seleção completa de pacotes dentro do flyout pequeno.
-  btnExtendSession.addEventListener("click", () => {
-    if (selectedHourlyRate) {
-      send("extendSessionRequest", { minutes: 60, kind: "hourly", optionId: selectedHourlyRate.id });
-    } else {
-      showAlert("warning", "Sem opções disponíveis", "Nenhuma tarifa horária está disponível no momento para adicionar tempo.");
-    }
   });
 })();

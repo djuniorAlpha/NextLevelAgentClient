@@ -267,45 +267,6 @@ body {
   color: var(--accent-4);
 }
 
-.btn-danger {
-  background: transparent;
-  border: 1px solid rgba(255, 77, 109, 0.4);
-  color: var(--danger);
-}
-
-.btn-danger:hover {
-  background: rgba(255, 77, 109, 0.1);
-  border-color: var(--danger);
-}
-
-.session-info-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-}
-
-.session-info-label {
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: 11px;
-}
-
-.session-info-value {
-  font-weight: 700;
-}
-
-.timer-value.timer-warning {
-  color: var(--danger);
-  animation: pulseWarning 1s ease-in-out infinite;
-}
-
-@keyframes pulseWarning {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
 .btn-back {
   position: absolute;
   top: 22px;

@@ -79,7 +79,6 @@
         </div>
       </div>
       <p class="instructions">O pagamento é confirmado automaticamente assim que o Pix cair.</p>
-      <button id="btnCancelExtend" class="btn btn-outline" type="button" style="display: none;">Cancelar</button>
     </section>
 
     <section id="panel-login" class="panel">
@@ -112,26 +111,6 @@
       </div>
     </section>
 
-    <section id="panel-active-session" class="panel">
-      <div class="session-info-row">
-        <span class="session-info-label">Origem</span>
-        <span id="sessionSource" class="session-info-value">—</span>
-      </div>
-      <div class="timer-row">
-        <span class="timer-icon">⏱</span>
-        <div class="timer-copy">
-          <span class="timer-label">Tempo restante</span>
-          <span id="sessionCounter" class="timer-value">--:--:--</span>
-        </div>
-      </div>
-      <div class="actions">
-        <button id="btnExtendSession" class="btn btn-outline" type="button">⏳ Adicionar mais tempo</button>
-        <button id="btnLockSession" class="btn btn-outline" type="button">🔒 Bloquear temporariamente</button>
-        <button id="btnMinimizeSession" class="btn btn-outline" type="button">🗕 Minimizar</button>
-        <button id="btnEndSession" class="btn btn-danger" type="button">🔴 Encerrar sessão</button>
-      </div>
-    </section>
-
     <div class="divider"></div>
 
     <footer class="card-footer">
@@ -146,15 +125,6 @@
       <h3 id="alertTitle" class="alert-title"></h3>
       <p id="alertMessage" class="alert-message"></p>
       <button id="alertOk" class="btn btn-primary alert-ok" type="button">OK</button>
-    </div>
-  </div>
-
-  <div id="sessionLockOverlay" class="alert-overlay">
-    <div class="alert-box">
-      <div class="alert-icon">🔒</div>
-      <h3 class="alert-title">Sessão bloqueada temporariamente</h3>
-      <p class="alert-message">Seu tempo continua sendo contado normalmente. Clique abaixo para voltar.</p>
-      <button id="btnUnlockSession" class="btn btn-primary alert-ok" type="button">Desbloquear</button>
     </div>
   </div>
 
