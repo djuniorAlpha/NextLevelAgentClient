@@ -27,7 +27,6 @@ namespace NextLevelAgentClient
         private string? _activeSessionId;
         private int _activeSessionAllocatedSeconds;
         private string? _activeSessionSource;
-        private bool _isFlyoutVisible = false;
         private bool _isTemporarilyLocked = false;
         private bool _isExtendingSession = false;
         private int _pendingExtendSeconds;
@@ -125,6 +124,7 @@ namespace NextLevelAgentClient
                 case "unlockSessionRequest": HandleResumePanelRequest(); break;
                 case "extendSessionRequest": HandleExtendSessionRequest(msg); break;
                 case "cancelExtendSessionRequest": HandleCancelExtendSessionRequest(); break;
+                case "minimizeSessionRequest": HandleMinimizeSessionRequest(); break;
             }
         }
 
@@ -179,7 +179,6 @@ namespace NextLevelAgentClient
                 _isExtendingSession = true;
                 _pendingExtendSeconds = msg.Minutes * 60;
 
-                _isFlyoutVisible = false;
                 ConfigureLockScreen();
                 this.Show();
                 PostToJs(new { type = "sessionExtendPixData", qrCodeBase64 = result.QrCodeBase64, qrCodeText = result.QrCodeText, amountCents = result.AmountCents });
@@ -224,7 +223,7 @@ namespace NextLevelAgentClient
             _isExtendingSession = false;
             _pendingExtendSeconds = 0;
 
-            ShowFlyout();
+            ShowSessionPanel();
         }
 
         private void CompleteExtendPayment()
@@ -239,7 +238,7 @@ namespace NextLevelAgentClient
             _currentPaymentId = null;
             _pendingExtendSeconds = 0;
 
-            ShowFlyout();
+            ShowSessionPanel();
             PostToJs(new { type = "sessionExtended", addedSeconds });
         }
 
@@ -586,7 +585,6 @@ namespace NextLevelAgentClient
                     await ReportSessionEndIfNeededAsync();
                     _session.CancelOperation();
                     trayIcon?.Visible = false;
-                    _isFlyoutVisible = false;
                     _isTemporarilyLocked = false;
                     ConfigureLockScreen();
                     this.Show();
@@ -673,10 +671,12 @@ namespace NextLevelAgentClient
             _session.OnPixTick += HandlePixTickPoll;
             _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
-            // Só posta pro WebView quando o flyout está aberto: evita trabalho à toa com a janela escondida.
+            // A WebView2 segue atualizando em segundo plano mesmo com a janela minimizada/escondida
+            // (ver ConfigureSessionPanel), então não há necessidade de gatear isso por visibilidade.
             _session.OnSessionTick += (time) =>
             {
-                if (_isFlyoutVisible) PostToJs(new { type = "sessionTick", text = $"{time:hh\\:mm\\:ss}", seconds = (int)time.TotalSeconds });
+                if (_session.CurrentState == MachineState.ActiveSession)
+                    PostToJs(new { type = "sessionTick", text = $"{time:hh\\:mm\\:ss}", seconds = (int)time.TotalSeconds });
             };
 
             _session.OnPixExpired += () =>
@@ -686,8 +686,7 @@ namespace NextLevelAgentClient
             };
             _session.OnSessionEnded += HandleSessionEnded;
 
-            // Aviso de tempo acabando via balloon tip (não abre o flyout sozinho - o painel só aparece
-            // por ação explícita do usuário, pra nunca cobrir um jogo/app sem pedir).
+            // Aviso de tempo acabando via balloon tip - útil sobretudo quando o painel está minimizado.
             _session.OnSessionTick += (time) =>
             {
                 if (time.TotalSeconds == 300)
@@ -704,9 +703,9 @@ namespace NextLevelAgentClient
             if (state == MachineState.ActiveSession)
             {
                 _isTemporarilyLocked = false;
-                this.Hide();
                 trayIcon?.Visible = true;
                 trayIcon?.ShowBalloonTip(3000, "Acesso Liberado!", "Aproveite sua sessão", ToolTipIcon.Info);
+                ShowSessionPanel();
             }
         }
 
@@ -715,7 +714,6 @@ namespace NextLevelAgentClient
             await ReportSessionEndIfNeededAsync();
 
             trayIcon?.Visible = false;
-            _isFlyoutVisible = false;
             ConfigureLockScreen();
             this.Show();
 
@@ -730,37 +728,25 @@ namespace NextLevelAgentClient
             this.Bounds = bounds;
             this.ShowInTaskbar = false;
             this.BackColor = Color.FromArgb(15, 15, 25);
-            PostToJs(new { type = "uiMode", value = "fullscreen" });
         }
 
-        // Janela pequena, ancorada no canto inferior direito, aberta só quando o usuário clica no
-        // ícone da bandeja - nunca sobrepõe jogos/apps sozinha, igual aos flyouts nativos do Windows.
-        private void ConfigureFlyout()
+        // Painel de sessão ativa: mesmo visual/tamanho tela cheia da tela de bloqueio, mas SEM
+        // TopMost - o usuário pode cobri-lo abrindo/focando outro app normalmente, ou minimizar
+        // explicitamente (ver HandleMinimizeSessionRequest) pra mandar pra bandeja.
+        private void ConfigureSessionPanel()
         {
-            const int width = 340;
-            const int height = 260;
-            const int margin = 20;
-
             this.FormBorderStyle = FormBorderStyle.None;
-            this.TopMost = true;
+            this.TopMost = false;
+            Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1024, 768);
+            this.Bounds = bounds;
             this.ShowInTaskbar = false;
             this.BackColor = Color.FromArgb(15, 15, 25);
-
-            Rectangle workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
-            this.Bounds = new Rectangle(
-                workingArea.Right - width - margin,
-                workingArea.Bottom - height - margin,
-                width,
-                height);
         }
 
-        private void ShowFlyout()
+        private void ShowSessionPanel()
         {
-            ConfigureFlyout();
-            _isFlyoutVisible = true;
+            ConfigureSessionPanel();
             this.Show();
-            this.Activate();
-            PostToJs(new { type = "uiMode", value = "flyout" });
             PostToJs(new
             {
                 type = "sessionInfo",
@@ -771,20 +757,26 @@ namespace NextLevelAgentClient
             });
         }
 
-        private void ToggleFlyout()
-        {
-            if (_session.CurrentState != MachineState.ActiveSession) return;
-            if (_isTemporarilyLocked) return; // só o botão "Desbloquear" da própria tela de bloqueio sai desse estado
+        // Só faz sentido "minimizar pra bandeja"/restaurar quando estamos no painel de sessão comum -
+        // as telas de bloqueio temporário e de extensão de tempo continuam bloqueantes (TopMost),
+        // sem essa opção.
+        private bool IsShowingSessionPanel =>
+            _session.CurrentState == MachineState.ActiveSession && !_isTemporarilyLocked && !_isExtendingSession;
 
-            if (_isFlyoutVisible)
-            {
-                _isFlyoutVisible = false;
-                this.Hide();
-            }
-            else
-            {
-                ShowFlyout();
-            }
+        private void HandleMinimizeSessionRequest()
+        {
+            if (!IsShowingSessionPanel) return;
+
+            this.Hide();
+            if (trayIcon != null) trayIcon.Visible = true;
+        }
+
+        private void HandleTrayIconClicked()
+        {
+            if (!IsShowingSessionPanel || this.Visible) return;
+
+            this.Show();
+            this.Activate(); // legítimo aqui: ação explícita do usuário (clique no ícone)
         }
 
         // Trava a tela sem encerrar a sessão (ex.: cliente vai se ausentar rapidamente) - o timer de
@@ -793,7 +785,6 @@ namespace NextLevelAgentClient
         {
             if (_session.CurrentState != MachineState.ActiveSession) return;
 
-            _isFlyoutVisible = false;
             _isTemporarilyLocked = true;
             ConfigureLockScreen();
             this.Show();
@@ -806,17 +797,7 @@ namespace NextLevelAgentClient
             if (!_isTemporarilyLocked) return;
 
             _isTemporarilyLocked = false;
-            ShowFlyout();
-        }
-
-        protected override void OnDeactivate(EventArgs e)
-        {
-            base.OnDeactivate(e);
-            if (_isFlyoutVisible)
-            {
-                _isFlyoutVisible = false;
-                this.Hide();
-            }
+            ShowSessionPanel();
         }
 
         private void ConfigureTrayIcon()
@@ -827,7 +808,7 @@ namespace NextLevelAgentClient
             trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false, ContextMenuStrip = menu };
             trayIcon.MouseClick += (s, e) =>
             {
-                if (e.Button == MouseButtons.Left) ToggleFlyout();
+                if (e.Button == MouseButtons.Left) HandleTrayIconClicked();
             };
         }
 
@@ -848,7 +829,6 @@ namespace NextLevelAgentClient
             await ReportSessionEndIfNeededAsync();
 
             _currentPaymentId = null;
-            _isFlyoutVisible = false;
             _isTemporarilyLocked = false;
             _session.CancelOperation();
             trayIcon!.Visible = false;
@@ -906,9 +886,17 @@ namespace NextLevelAgentClient
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (!_allowClose) { e.Cancel = true; return; }
-            if (trayIcon != null) trayIcon?.Visible = false;
-            base.OnFormClosing(e);
+            if (_allowClose)
+            {
+                if (trayIcon != null) trayIcon.Visible = false;
+                base.OnFormClosing(e);
+                return;
+            }
+
+            e.Cancel = true;
+            // Sem borda nesse modo, não há botão nativo de fechar - mas Alt+F4 ainda chega aqui.
+            // Durante o painel de sessão ativa, tratamos como "minimizar pra bandeja" em vez de não fazer nada.
+            if (IsShowingSessionPanel) HandleMinimizeSessionRequest();
         }
 
         protected override CreateParams CreateParams

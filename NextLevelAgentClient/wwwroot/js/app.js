@@ -50,6 +50,7 @@
   const btnExtendSession = document.getElementById("btnExtendSession");
   const btnLockSession = document.getElementById("btnLockSession");
   const btnEndSession = document.getElementById("btnEndSession");
+  const btnMinimizeSession = document.getElementById("btnMinimizeSession");
   const sessionLockOverlay = document.getElementById("sessionLockOverlay");
   const btnUnlockSession = document.getElementById("btnUnlockSession");
   const btnCancelExtend = document.getElementById("btnCancelExtend");
@@ -289,9 +290,6 @@
         case "pixData":
           setPixData(msg.qrCodeBase64, msg.qrCodeText, msg.amountCents);
           break;
-        case "uiMode":
-          document.body.classList.toggle("panel-mode", msg.value === "flyout");
-          break;
         case "sessionInfo":
           setSessionInfo(msg.source, msg.remainingSeconds);
           break;
@@ -344,6 +342,7 @@
   });
 
   btnEndSession.addEventListener("click", () => send("endSessionRequest"));
+  btnMinimizeSession.addEventListener("click", () => send("minimizeSessionRequest"));
   btnLockSession.addEventListener("click", () => send("lockSessionRequest"));
   btnUnlockSession.addEventListener("click", () => send("unlockSessionRequest"));
   btnCancelExtend.addEventListener("click", () => send("cancelExtendSessionRequest"));
