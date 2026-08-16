@@ -421,20 +421,30 @@ namespace NextLevelAgentClient
         }
 
         // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
-        private void HandlePaymentConfirmedFromSocket(string paymentId, string? tokenCode)
+        private void HandlePaymentConfirmedFromSocket(string paymentId, string? tokenCode, string? sessionId)
         {
             if (paymentId != _currentPaymentId) return;
-            this.BeginInvoke(new MethodInvoker(() => CompletePixPayment(tokenCode)));
+            this.BeginInvoke(new MethodInvoker(() => CompletePixPayment(tokenCode, sessionId)));
         }
 
-        private void CompletePixPayment(string? tokenCode)
+        private void CompletePixPayment(string? tokenCode, string? sessionId)
         {
             if (_session.CurrentState != MachineState.WaitingForPix) return;
             _currentPaymentId = null;
 
-            // Todo pagamento Pix aprovado gera um código de saldo restante (o backend cria a sessão
-            // já vinculada a ele) - se o cliente não usar todo o tempo, esse código pode ser resgatado
-            // depois em qualquer máquina via "Tenho um código" (start-with-token).
+            // O backend já abre a sessão nesta máquina vinculada ao token assim que aprova o Pix.
+            // Guardamos o id pra poder reportar quanto foi consumido lá na frente (ReportSessionEndIfNeededAsync),
+            // o que faz o backend descontar do saldo do token - sem isso, o saldo nunca decrementaria
+            // para quem paga e usa o tempo na própria máquina (só funcionaria pro resgate em outra máquina).
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                _activeSessionId = sessionId;
+                _activeSessionAllocatedSeconds = _session.RemainingSessionTime;
+            }
+
+            // Todo pagamento Pix aprovado gera um código de saldo restante - se o cliente não usar
+            // todo o tempo, esse código pode ser resgatado depois em qualquer máquina via
+            // "Tenho um código" (start-with-token).
             if (!string.IsNullOrEmpty(tokenCode))
                 ShowPixTokenCode(tokenCode);
 
@@ -500,7 +510,7 @@ namespace NextLevelAgentClient
             {
                 PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
                 if (status.Status == "approved")
-                    CompletePixPayment(status.PixToken?.Code);
+                    CompletePixPayment(status.PixToken?.Code, status.Session?.Id);
             }
             catch (Exception ex)
             {

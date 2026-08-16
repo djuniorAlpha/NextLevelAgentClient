@@ -12,11 +12,16 @@ namespace NextLevelAgentClient.Core.Services
     public sealed record PixTokenInfo(string Code, System.DateTimeOffset ExpiresAt, int RemainingSeconds);
 
     /// <summary>
-    /// Recorte do Payment do backend usado só pra checar status (GET /payments/:id),
-    /// como fallback caso o WebSocket falhe. <see cref="PixToken"/> só vem preenchido
-    /// depois que o pagamento é aprovado.
+    /// Sessão que o backend abriu automaticamente na máquina pagante assim que o Pix foi aprovado.
     /// </summary>
-    public sealed record PixPaymentStatus(string Id, string Status, PixTokenInfo? PixToken);
+    public sealed record PaymentSessionInfo(string Id);
+
+    /// <summary>
+    /// Recorte do Payment do backend usado só pra checar status (GET /payments/:id),
+    /// como fallback caso o WebSocket falhe. <see cref="PixToken"/> e <see cref="Session"/> só vêm
+    /// preenchidos depois que o pagamento é aprovado.
+    /// </summary>
+    public sealed record PixPaymentStatus(string Id, string Status, PixTokenInfo? PixToken, PaymentSessionInfo? Session);
 
     /// <summary>
     /// Resposta do backend ao resgatar um código Pix nesta máquina
