@@ -26,6 +26,12 @@ namespace NextLevelAgentClient
         private string? _pendingCustomerToken;
         private string? _activeSessionId;
         private int _activeSessionAllocatedSeconds;
+        private string? _activeSessionSource;
+        private bool _isFlyoutVisible = false;
+        private bool _isTemporarilyLocked = false;
+        private bool _isExtendingSession = false;
+        private int _pendingExtendSeconds;
+        private System.Windows.Forms.Timer? _extendPollTimer;
 
         private WebView2? webView;
         private NotifyIcon? trayIcon;
@@ -114,6 +120,11 @@ namespace NextLevelAgentClient
                 case "selectTime": HandleSelectTime(msg); break;
                 case "redeemToken": _session.ChangeState(MachineState.RedeemToken); break;
                 case "redeemTokenRequest": HandleRedeemTokenRequest(msg.Code); break;
+                case "endSessionRequest": HandleEndSessionRequestedByUser(); break;
+                case "lockSessionRequest": HandleSuspendPanelRequest(); break;
+                case "unlockSessionRequest": HandleResumePanelRequest(); break;
+                case "extendSessionRequest": HandleExtendSessionRequest(msg); break;
+                case "cancelExtendSessionRequest": HandleCancelExtendSessionRequest(); break;
             }
         }
 
@@ -143,6 +154,93 @@ namespace NextLevelAgentClient
                 ShowAlert("error", "Falha ao gerar cobrança", $"Não foi possível gerar a cobrança Pix: {ex.Message}");
                 _session.CancelOperation();
             }
+        }
+
+        // Compra de mais tempo com a sessão já ativa: ao contrário de HandleSelectTime, NÃO chama
+        // _session.StartPixExpectancy (isso sobrescreveria RemainingSessionTime da sessão em andamento).
+        // O tempo só é somado quando o pagamento é confirmado (CompleteExtendPayment).
+        private async void HandleExtendSessionRequest(WebMessage msg)
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível gerar a cobrança: máquina não está sincronizada com o servidor.");
+                return;
+            }
+
+            try
+            {
+                string? timePackageId = msg.Kind == "package" ? msg.OptionId : null;
+                string? hourlyRateId = msg.Kind == "hourly" ? msg.OptionId : null;
+
+                PixPaymentResult result = await _apiService.CreatePixPaymentAsync(_computerUuid, _apiKey, timePackageId, hourlyRateId, msg.Minutes);
+                _currentPaymentId = result.PaymentId;
+                _isExtendingSession = true;
+                _pendingExtendSeconds = msg.Minutes * 60;
+
+                _isFlyoutVisible = false;
+                ConfigureLockScreen();
+                this.Show();
+                PostToJs(new { type = "sessionExtendPixData", qrCodeBase64 = result.QrCodeBase64, qrCodeText = result.QrCodeText, amountCents = result.AmountCents });
+
+                // A extensão não passa por _session.StartPixExpectancy (isso reiniciaria RemainingSessionTime),
+                // então o polling de fallback ligado ao pixTick do SessionManager nunca cobriria este pagamento.
+                // Timer próprio, independente do SessionManager, só pra este fluxo.
+                _extendPollTimer ??= new System.Windows.Forms.Timer { Interval = 5000 };
+                _extendPollTimer.Tick -= OnExtendPollTick;
+                _extendPollTimer.Tick += OnExtendPollTick;
+                _extendPollTimer.Start();
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Falha ao gerar cobrança", $"Não foi possível gerar a cobrança Pix: {ex.Message}");
+            }
+        }
+
+        // Fallback caso o WebSocket falhe: consulta o status a cada 5s enquanto aguarda a confirmação
+        // do pagamento de extensão de tempo (espelha HandlePixTickPoll, mas para o fluxo de extensão).
+        private async void OnExtendPollTick(object? sender, EventArgs e)
+        {
+            if (!_isExtendingSession || string.IsNullOrEmpty(_currentPaymentId) || string.IsNullOrEmpty(_apiKey)) return;
+
+            try
+            {
+                PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
+                if (status.Status == "approved") CompleteExtendPayment();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao consultar status do pagamento de extensão: {ex.Message}");
+            }
+        }
+
+        private void HandleCancelExtendSessionRequest()
+        {
+            if (!_isExtendingSession) return;
+
+            _extendPollTimer?.Stop();
+            _currentPaymentId = null;
+            _isExtendingSession = false;
+            _pendingExtendSeconds = 0;
+
+            ShowFlyout();
+        }
+
+        private void CompleteExtendPayment()
+        {
+            _extendPollTimer?.Stop();
+
+            _session.ExtendSession(_pendingExtendSeconds);
+            _activeSessionAllocatedSeconds += _pendingExtendSeconds;
+            int addedSeconds = _pendingExtendSeconds;
+
+            _isExtendingSession = false;
+            _currentPaymentId = null;
+            _pendingExtendSeconds = 0;
+
+            ShowFlyout();
+            PostToJs(new { type = "sessionExtended", addedSeconds });
         }
 
         private async void HandleLoginRequest(string? username, string? password)
@@ -220,6 +318,7 @@ namespace NextLevelAgentClient
                 StartSessionResult session = await _apiService.StartSessionForCustomerAsync(_computerUuid, _apiKey, customerAccessToken);
                 _activeSessionId = session.SessionId;
                 _activeSessionAllocatedSeconds = session.AllocatedSeconds;
+                _activeSessionSource = session.Source;
                 _session.ConfirmLogin(session.AllocatedSeconds);
             }
             catch (Exception ex)
@@ -247,6 +346,7 @@ namespace NextLevelAgentClient
                 RedeemTokenResult result = await _apiService.RedeemPixTokenAsync(_computerUuid, _apiKey, code);
                 _activeSessionId = result.SessionId;
                 _activeSessionAllocatedSeconds = result.AllocatedSeconds;
+                _activeSessionSource = result.Source;
                 _session.ConfirmLogin(result.AllocatedSeconds);
             }
             catch (Exception ex)
@@ -424,6 +524,13 @@ namespace NextLevelAgentClient
         private void HandlePaymentConfirmedFromSocket(string paymentId, string? tokenCode, string? sessionId)
         {
             if (paymentId != _currentPaymentId) return;
+
+            if (_isExtendingSession)
+            {
+                this.BeginInvoke(new MethodInvoker(CompleteExtendPayment));
+                return;
+            }
+
             this.BeginInvoke(new MethodInvoker(() => CompletePixPayment(tokenCode, sessionId)));
         }
 
@@ -441,6 +548,7 @@ namespace NextLevelAgentClient
                 _activeSessionId = sessionId;
                 _activeSessionAllocatedSeconds = _session.RemainingSessionTime;
             }
+            _activeSessionSource = "pix";
 
             // Todo pagamento Pix aprovado gera um código de saldo restante - se o cliente não usar
             // todo o tempo, esse código pode ser resgatado depois em qualquer máquina via
@@ -478,12 +586,15 @@ namespace NextLevelAgentClient
                     await ReportSessionEndIfNeededAsync();
                     _session.CancelOperation();
                     trayIcon?.Visible = false;
+                    _isFlyoutVisible = false;
+                    _isTemporarilyLocked = false;
                     ConfigureLockScreen();
                     this.Show();
                     ShowAlert("warning", "Bloqueado", "Esta máquina foi bloqueada pelo atendente.");
                     break;
                 case "unlock":
                     _currentPaymentId = null;
+                    _activeSessionSource = "unlock";
                     await ReportSessionEndIfNeededAsync();
                     _session.ForceUnlock();
                     break;
@@ -513,7 +624,10 @@ namespace NextLevelAgentClient
             {
                 PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
                 if (status.Status == "approved")
-                    CompletePixPayment(status.PixToken?.Code, status.Session?.Id);
+                {
+                    if (_isExtendingSession) CompleteExtendPayment();
+                    else CompletePixPayment(status.PixToken?.Code, status.Session?.Id);
+                }
             }
             catch (Exception ex)
             {
@@ -559,6 +673,12 @@ namespace NextLevelAgentClient
             _session.OnPixTick += HandlePixTickPoll;
             _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
+            // Só posta pro WebView quando o flyout está aberto: evita trabalho à toa com a janela escondida.
+            _session.OnSessionTick += (time) =>
+            {
+                if (_isFlyoutVisible) PostToJs(new { type = "sessionTick", text = $"{time:hh\\:mm\\:ss}", seconds = (int)time.TotalSeconds });
+            };
+
             _session.OnPixExpired += () =>
             {
                 _currentPaymentId = null;
@@ -566,9 +686,13 @@ namespace NextLevelAgentClient
             };
             _session.OnSessionEnded += HandleSessionEnded;
 
+            // Aviso de tempo acabando via balloon tip (não abre o flyout sozinho - o painel só aparece
+            // por ação explícita do usuário, pra nunca cobrir um jogo/app sem pedir).
             _session.OnSessionTick += (time) =>
             {
-                if (time.TotalSeconds == 15)
+                if (time.TotalSeconds == 300)
+                    trayIcon?.ShowBalloonTip(5000, "Atenção!", "Faltam 5 minutos para o fim da sua sessão.", ToolTipIcon.Warning);
+                else if (time.TotalSeconds == 15)
                     trayIcon?.ShowBalloonTip(5000, "Atenção!", "Seu tempo está quase acabando! O PC bloqueará em 15 segundos.", ToolTipIcon.Warning);
             };
         }
@@ -579,6 +703,7 @@ namespace NextLevelAgentClient
 
             if (state == MachineState.ActiveSession)
             {
+                _isTemporarilyLocked = false;
                 this.Hide();
                 trayIcon?.Visible = true;
                 trayIcon?.ShowBalloonTip(3000, "Acesso Liberado!", "Aproveite sua sessão", ToolTipIcon.Info);
@@ -590,6 +715,7 @@ namespace NextLevelAgentClient
             await ReportSessionEndIfNeededAsync();
 
             trayIcon?.Visible = false;
+            _isFlyoutVisible = false;
             ConfigureLockScreen();
             this.Show();
 
@@ -604,19 +730,110 @@ namespace NextLevelAgentClient
             this.Bounds = bounds;
             this.ShowInTaskbar = false;
             this.BackColor = Color.FromArgb(15, 15, 25);
+            PostToJs(new { type = "uiMode", value = "fullscreen" });
+        }
+
+        // Janela pequena, ancorada no canto inferior direito, aberta só quando o usuário clica no
+        // ícone da bandeja - nunca sobrepõe jogos/apps sozinha, igual aos flyouts nativos do Windows.
+        private void ConfigureFlyout()
+        {
+            const int width = 340;
+            const int height = 260;
+            const int margin = 20;
+
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.TopMost = true;
+            this.ShowInTaskbar = false;
+            this.BackColor = Color.FromArgb(15, 15, 25);
+
+            Rectangle workingArea = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+            this.Bounds = new Rectangle(
+                workingArea.Right - width - margin,
+                workingArea.Bottom - height - margin,
+                width,
+                height);
+        }
+
+        private void ShowFlyout()
+        {
+            ConfigureFlyout();
+            _isFlyoutVisible = true;
+            this.Show();
+            this.Activate();
+            PostToJs(new { type = "uiMode", value = "flyout" });
+            PostToJs(new
+            {
+                type = "sessionInfo",
+                machineNumber = _machineNumber,
+                source = _activeSessionSource,
+                allocatedSeconds = _activeSessionAllocatedSeconds,
+                remainingSeconds = _session.RemainingSessionTime,
+            });
+        }
+
+        private void ToggleFlyout()
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+            if (_isTemporarilyLocked) return; // só o botão "Desbloquear" da própria tela de bloqueio sai desse estado
+
+            if (_isFlyoutVisible)
+            {
+                _isFlyoutVisible = false;
+                this.Hide();
+            }
+            else
+            {
+                ShowFlyout();
+            }
+        }
+
+        // Trava a tela sem encerrar a sessão (ex.: cliente vai se ausentar rapidamente) - o timer de
+        // sessão continua rodando normalmente, o tempo pago segue sendo consumido.
+        private void HandleSuspendPanelRequest()
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+
+            _isFlyoutVisible = false;
+            _isTemporarilyLocked = true;
+            ConfigureLockScreen();
+            this.Show();
+            PostToJs(new { type = "sessionLocked" });
+        }
+
+        private void HandleResumePanelRequest()
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+            if (!_isTemporarilyLocked) return;
+
+            _isTemporarilyLocked = false;
+            ShowFlyout();
+        }
+
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            if (_isFlyoutVisible)
+            {
+                _isFlyoutVisible = false;
+                this.Hide();
+            }
         }
 
         private void ConfigureTrayIcon()
         {
             var menu = new ContextMenuStrip();
-            menu.Items.Add("Encerrar sessão", null, HandleEndSessionRequestedByUser);
+            menu.Items.Add("Encerrar sessão", null, (s, e) => HandleEndSessionRequestedByUser());
 
             trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false, ContextMenuStrip = menu };
+            trayIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) ToggleFlyout();
+            };
         }
 
-        // Item do menu do tray icon: permite ao próprio cliente encerrar a sessão ativa e bloquear
-        // a máquina, sem depender de uma ação remota do atendente.
-        private async void HandleEndSessionRequestedByUser(object? sender, EventArgs e)
+        // Encerra a sessão ativa e bloqueia a máquina, sem depender de uma ação remota do atendente -
+        // chamado tanto pelo menu do tray icon (botão direito) quanto pelo botão no flyout.
+        private async void HandleEndSessionRequestedByUser()
         {
             if (_session.CurrentState != MachineState.ActiveSession) return;
 
@@ -631,6 +848,8 @@ namespace NextLevelAgentClient
             await ReportSessionEndIfNeededAsync();
 
             _currentPaymentId = null;
+            _isFlyoutVisible = false;
+            _isTemporarilyLocked = false;
             _session.CancelOperation();
             trayIcon!.Visible = false;
             ConfigureLockScreen();

@@ -80,6 +80,15 @@ namespace NextLevelAgentClient.Core
             ChangeState(MachineState.ActiveSession);
         }
 
+        /// <summary>
+        /// Soma tempo a uma sessão já ativa (ex.: cliente comprou mais tempo pelo painel),
+        /// sem reiniciar o timer nem sair de ActiveSession.
+        /// </summary>
+        public void ExtendSession(int additionalSeconds)
+        {
+            RemainingSessionTime += additionalSeconds;
+        }
+
         private void ProcessPixTick()
         {
             if (RemainingPixTime > 0)
