@@ -606,7 +606,37 @@ namespace NextLevelAgentClient
             this.BackColor = Color.FromArgb(15, 15, 25);
         }
 
-        private void ConfigureTrayIcon() => trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false };
+        private void ConfigureTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Encerrar sessão", null, HandleEndSessionRequestedByUser);
+
+            trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false, ContextMenuStrip = menu };
+        }
+
+        // Item do menu do tray icon: permite ao próprio cliente encerrar a sessão ativa e bloquear
+        // a máquina, sem depender de uma ação remota do atendente.
+        private async void HandleEndSessionRequestedByUser(object? sender, EventArgs e)
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+
+            DialogResult confirm = MessageBox.Show(
+                "Deseja realmente encerrar sua sessão agora? A máquina será bloqueada.",
+                "Encerrar sessão",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes) return;
+
+            await ReportSessionEndIfNeededAsync();
+
+            _currentPaymentId = null;
+            _session.CancelOperation();
+            trayIcon!.Visible = false;
+            ConfigureLockScreen();
+            this.Show();
+            ShowAlert("info", "Sessão encerrada", "Sua sessão foi encerrada. Obrigado por jogar com a gente!");
+        }
 
         private static Icon LoadTrayIcon()
         {
