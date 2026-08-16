@@ -46,6 +46,7 @@ namespace NextLevelAgentClient
 
             BindSessionEvents();
 
+            this.Icon = LoadTrayIcon();
             ConfigureLockScreen();
             ConfigureTrayIcon();
 
@@ -179,8 +180,10 @@ namespace NextLevelAgentClient
                 _isExtendingSession = true;
                 _pendingExtendSeconds = msg.Minutes * 60;
 
-                ConfigureLockScreen();
-                this.Show();
+                // Só força TopMost enquanto aguarda o pagamento - não mexe em FormBorderStyle/
+                // ShowInTaskbar (isso recriaria o handle nativo da janela e desconectaria a WebView2
+                // por um instante, o que deixava a tela seguinte "travada"/sem responder a cliques).
+                this.TopMost = true;
                 PostToJs(new { type = "sessionExtendPixData", qrCodeBase64 = result.QrCodeBase64, qrCodeText = result.QrCodeText, amountCents = result.AmountCents });
 
                 // A extensão não passa por _session.StartPixExpectancy (isso reiniciaria RemainingSessionTime),
@@ -223,7 +226,7 @@ namespace NextLevelAgentClient
             _isExtendingSession = false;
             _pendingExtendSeconds = 0;
 
-            ShowSessionPanel();
+            this.TopMost = false;
         }
 
         private void CompleteExtendPayment()
@@ -238,7 +241,8 @@ namespace NextLevelAgentClient
             _currentPaymentId = null;
             _pendingExtendSeconds = 0;
 
-            ShowSessionPanel();
+            this.TopMost = false;
+            RefreshSessionInfo();
             PostToJs(new { type = "sessionExtended", addedSeconds });
         }
 
@@ -720,8 +724,11 @@ namespace NextLevelAgentClient
             ShowAlert("warning", "Sessão Encerrada", "Seu tempo acabou! O computador será bloqueado.");
         }
 
+        // Tela de bloqueio (kiosk): sem borda, tela cheia, sempre na frente, fora da barra de
+        // tarefas - usada só nos estados que precisam realmente travar a máquina.
         private void ConfigureLockScreen()
         {
+            this.WindowState = FormWindowState.Normal; // Bounds abaixo não tem efeito com WindowState=Maximized
             this.FormBorderStyle = FormBorderStyle.None;
             this.TopMost = true;
             Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1024, 768);
@@ -730,23 +737,35 @@ namespace NextLevelAgentClient
             this.BackColor = Color.FromArgb(15, 15, 25);
         }
 
-        // Painel de sessão ativa: mesmo visual/tamanho tela cheia da tela de bloqueio, mas SEM
-        // TopMost - o usuário pode cobri-lo abrindo/focando outro app normalmente, ou minimizar
-        // explicitamente (ver HandleMinimizeSessionRequest) pra mandar pra bandeja.
+        // Painel de sessão ativa: janela normal do Windows (com borda, título e os botões nativos
+        // de minimizar/maximizar/fechar), aparece na barra de tarefas e não fica TopMost - o usuário
+        // pode cobri-la só focando outro app normalmente, igual qualquer programa.
+        //
+        // Importante: enquanto a sessão está ativa, NUNCA trocamos FormBorderStyle/ShowInTaskbar de
+        // novo (bloqueio temporário e extensão de tempo só alternam TopMost - ver
+        // HandleSuspendPanelRequest/HandleExtendSessionRequest). Mudar essas propriedades recria o
+        // handle nativo da janela, o que desconecta a WebView2 por um instante e deixava a tela
+        // seguinte sem responder a cliques (era a causa do botão "Desbloquear" não funcionar).
         private void ConfigureSessionPanel()
         {
-            this.FormBorderStyle = FormBorderStyle.None;
+            this.WindowState = FormWindowState.Normal;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.ShowInTaskbar = true;
             this.TopMost = false;
-            Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1024, 768);
-            this.Bounds = bounds;
-            this.ShowInTaskbar = false;
+            this.Text = "Next Level Gaming House";
             this.BackColor = Color.FromArgb(15, 15, 25);
+            this.WindowState = FormWindowState.Maximized;
         }
 
         private void ShowSessionPanel()
         {
             ConfigureSessionPanel();
             this.Show();
+            RefreshSessionInfo();
+        }
+
+        private void RefreshSessionInfo()
+        {
             PostToJs(new
             {
                 type = "sessionInfo",
@@ -771,23 +790,35 @@ namespace NextLevelAgentClient
             if (trayIcon != null) trayIcon.Visible = true;
         }
 
+        // Clicar no botão nativo de minimizar também deve mandar pra bandeja (não pra barra de
+        // tarefas) - assim "minimizar" e "fechar" (OnFormClosing) se comportam igual.
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.WindowState == FormWindowState.Minimized && IsShowingSessionPanel)
+            {
+                HandleMinimizeSessionRequest();
+            }
+        }
+
         private void HandleTrayIconClicked()
         {
             if (!IsShowingSessionPanel || this.Visible) return;
 
+            this.WindowState = FormWindowState.Maximized; // desfaz o Minimized deixado pelo OnResize acima
             this.Show();
             this.Activate(); // legítimo aqui: ação explícita do usuário (clique no ícone)
         }
 
         // Trava a tela sem encerrar a sessão (ex.: cliente vai se ausentar rapidamente) - o timer de
-        // sessão continua rodando normalmente, o tempo pago segue sendo consumido.
+        // sessão continua rodando normalmente, o tempo pago segue sendo consumido. Só alterna
+        // TopMost (ver comentário em ConfigureSessionPanel sobre por que não mexemos na borda aqui).
         private void HandleSuspendPanelRequest()
         {
             if (_session.CurrentState != MachineState.ActiveSession) return;
 
             _isTemporarilyLocked = true;
-            ConfigureLockScreen();
-            this.Show();
+            this.TopMost = true;
             PostToJs(new { type = "sessionLocked" });
         }
 
@@ -797,7 +828,8 @@ namespace NextLevelAgentClient
             if (!_isTemporarilyLocked) return;
 
             _isTemporarilyLocked = false;
-            ShowSessionPanel();
+            this.TopMost = false;
+            PostToJs(new { type = "sessionUnlocked" });
         }
 
         private void ConfigureTrayIcon()
@@ -894,14 +926,23 @@ namespace NextLevelAgentClient
             }
 
             e.Cancel = true;
-            // Sem borda nesse modo, não há botão nativo de fechar - mas Alt+F4 ainda chega aqui.
-            // Durante o painel de sessão ativa, tratamos como "minimizar pra bandeja" em vez de não fazer nada.
+            // Durante as telas de bloqueio (kiosk) o fechamento é sempre bloqueado (comportamento
+            // original). Durante o painel de sessão ativa, o botão nativo de fechar (e Alt+F4) só
+            // manda pra bandeja em vez de sair do programa.
             if (IsShowingSessionPanel) HandleMinimizeSessionRequest();
         }
 
         protected override CreateParams CreateParams
         {
-            get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00000080; return cp; }
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                // WS_EX_TOOLWINDOW: esconde do Alt+Tab - só nas telas de bloqueio (kiosk), que também
+                // são as únicas com ShowInTaskbar=false. O painel de sessão ativa é uma janela normal
+                // (ShowInTaskbar=true) e deve aparecer tanto na barra de tarefas quanto no Alt+Tab.
+                if (!this.ShowInTaskbar) cp.ExStyle |= 0x00000080;
+                return cp;
+            }
         }
 
         private sealed class WebMessage
