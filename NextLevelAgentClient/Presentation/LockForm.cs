@@ -469,13 +469,13 @@ namespace NextLevelAgentClient
             this.BeginInvoke(new MethodInvoker(() => HandleForceAction(action)));
         }
 
-        private void HandleForceAction(string action)
+        private async void HandleForceAction(string action)
         {
             switch (action)
             {
                 case "lock":
                     _currentPaymentId = null;
-                    _ = ReportSessionEndIfNeededAsync();
+                    await ReportSessionEndIfNeededAsync();
                     _session.CancelOperation();
                     trayIcon?.Visible = false;
                     ConfigureLockScreen();
@@ -484,10 +484,13 @@ namespace NextLevelAgentClient
                     break;
                 case "unlock":
                     _currentPaymentId = null;
-                    _ = ReportSessionEndIfNeededAsync();
+                    await ReportSessionEndIfNeededAsync();
                     _session.ForceUnlock();
                     break;
                 case "shutdown":
+                    // Precisa terminar de reportar ANTES de desligar: "shutdown /t 0" derruba o processo
+                    // imediatamente, então um fire-and-forget aqui nunca chegaria a sair da máquina.
+                    await ReportSessionEndIfNeededAsync();
                     try
                     {
                         Process.Start("shutdown", "/s /t 0 /f");
@@ -582,9 +585,9 @@ namespace NextLevelAgentClient
             }
         }
 
-        private void HandleSessionEnded()
+        private async void HandleSessionEnded()
         {
-            _ = ReportSessionEndIfNeededAsync();
+            await ReportSessionEndIfNeededAsync();
 
             trayIcon?.Visible = false;
             ConfigureLockScreen();
@@ -618,10 +621,12 @@ namespace NextLevelAgentClient
             }
         }
 
-        private void HandleDeveloperExit()
+        private async void HandleDeveloperExit()
         {
             _allowClose = true;
-            _ = ReportSessionEndIfNeededAsync();
+            // Precisa esperar terminar antes de fechar: com fire-and-forget aqui, o this.Close() logo
+            // abaixo podia derrubar o processo antes do HTTP de fim de sessão sair, perdendo o report.
+            await ReportSessionEndIfNeededAsync();
             _session.CancelOperation();
             _heartbeatTimer?.Stop();
             if (_realtimeClient != null) _ = _realtimeClient.DisposeAsync();
