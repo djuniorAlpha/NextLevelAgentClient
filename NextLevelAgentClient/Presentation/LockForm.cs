@@ -112,6 +112,8 @@ namespace NextLevelAgentClient
                 case "changePasswordRequest": HandleChangePasswordRequest(msg.NewPassword, msg.ConfirmPassword); break;
                 case "back": HandleBack(); break;
                 case "selectTime": HandleSelectTime(msg); break;
+                case "redeemToken": _session.ChangeState(MachineState.RedeemToken); break;
+                case "redeemTokenRequest": HandleRedeemTokenRequest(msg.Code); break;
             }
         }
 
@@ -223,6 +225,33 @@ namespace NextLevelAgentClient
             catch (Exception ex)
             {
                 ShowAlert("error", "Erro ao iniciar sessão", ex.Message);
+            }
+        }
+
+        private async void HandleRedeemTokenRequest(string? code)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                ShowAlert("error", "Código inválido", "Informe o código do seu Pix.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível validar o código: máquina não está sincronizada com o servidor.");
+                return;
+            }
+
+            try
+            {
+                RedeemTokenResult result = await _apiService.RedeemPixTokenAsync(_computerUuid, _apiKey, code);
+                _activeSessionId = result.SessionId;
+                _activeSessionAllocatedSeconds = result.AllocatedSeconds;
+                _session.ConfirmLogin(result.AllocatedSeconds);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Código inválido", ex.Message);
             }
         }
 
@@ -392,17 +421,36 @@ namespace NextLevelAgentClient
         }
 
         // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
-        private void HandlePaymentConfirmedFromSocket(string paymentId)
+        private void HandlePaymentConfirmedFromSocket(string paymentId, string? tokenCode)
         {
             if (paymentId != _currentPaymentId) return;
-            this.BeginInvoke(new MethodInvoker(CompletePixPayment));
+            this.BeginInvoke(new MethodInvoker(() => CompletePixPayment(tokenCode)));
         }
 
-        private void CompletePixPayment()
+        private void CompletePixPayment(string? tokenCode)
         {
             if (_session.CurrentState != MachineState.WaitingForPix) return;
             _currentPaymentId = null;
+
+            // Todo pagamento Pix aprovado gera um código de saldo restante (o backend cria a sessão
+            // já vinculada a ele) - se o cliente não usar todo o tempo, esse código pode ser resgatado
+            // depois em qualquer máquina via "Tenho um código" (start-with-token).
+            if (!string.IsNullOrEmpty(tokenCode))
+                ShowPixTokenCode(tokenCode);
+
             _session.ConfirmPixPayment();
+        }
+
+        private void ShowPixTokenCode(string tokenCode)
+        {
+            try { Clipboard.SetText(tokenCode); } catch { /* melhor esforço: área de transferência pode estar indisponível */ }
+
+            MessageBox.Show(
+                this,
+                $"Guarde este código: {tokenCode}\n\nSe sobrar tempo não utilizado ao final da sua sessão, use-o em qualquer computador desta lan house para continuar de onde parou.\n\n(Já copiado para a área de transferência.)",
+                "Seu código Pix",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
 
         // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
@@ -452,7 +500,7 @@ namespace NextLevelAgentClient
             {
                 PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
                 if (status.Status == "approved")
-                    CompletePixPayment();
+                    CompletePixPayment(status.PixToken?.Code);
             }
             catch (Exception ex)
             {
@@ -614,6 +662,7 @@ namespace NextLevelAgentClient
             public string? OptionId { get; set; }
             public string? NewPassword { get; set; }
             public string? ConfirmPassword { get; set; }
+            public string? Code { get; set; }
         }
     }
 }

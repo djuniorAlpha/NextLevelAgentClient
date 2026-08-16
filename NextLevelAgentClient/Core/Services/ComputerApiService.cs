@@ -110,6 +110,20 @@ namespace NextLevelAgentClient.Core.Services
             return status ?? throw new InvalidOperationException("Resposta vazia do backend ao consultar pagamento.");
         }
 
+        public async Task<RedeemTokenResult> RedeemPixTokenAsync(string computerUuid, string apiKey, string code)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"machines/{computerUuid}/sessions/start-with-token")
+            {
+                Content = JsonContent.Create(new { code }, options: JsonOptions)
+            };
+            request.Headers.Add("X-Api-Key", apiKey);
+
+            using HttpResponseMessage response = await _http.SendAsync(request);
+            await EnsureSuccessOrThrowFriendlyAsync(response);
+            RedeemTokenResult? result = await response.Content.ReadFromJsonAsync<RedeemTokenResult>(JsonOptions);
+            return result ?? throw new InvalidOperationException("Resposta vazia do backend ao resgatar código.");
+        }
+
         public async Task<CustomerLoginResult> LoginCustomerAsync(string username, string password)
         {
             var payload = new { username, password };

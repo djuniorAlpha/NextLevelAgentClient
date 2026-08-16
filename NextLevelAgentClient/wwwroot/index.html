@@ -37,6 +37,7 @@
       <div class="actions">
         <button id="btnBuyTime" class="btn btn-primary" type="button">🛒 Comprar tempo</button>
         <button id="btnLogin" class="btn btn-outline" type="button">🔑 Login</button>
+        <button id="btnRedeemToken" class="btn btn-outline" type="button">🎟️ Tenho um código Pix</button>
       </div>
     </section>
 
@@ -86,6 +87,17 @@
         <input id="txtUsername" class="input" type="text" placeholder="Usuário" autocomplete="off" />
         <input id="txtPassword" class="input" type="password" placeholder="Senha" autocomplete="off" />
         <button id="btnLoginRequest" class="btn btn-primary" type="button">Entrar</button>
+      </div>
+    </section>
+
+    <section id="panel-redeem-token" class="panel">
+      <h2 class="subtitle">Resgatar código Pix</h2>
+      <p class="instructions">
+        Digite o código recebido em um pagamento Pix anterior para usar o tempo restante nesta máquina.
+      </p>
+      <div class="form">
+        <input id="txtRedeemCode" class="input" type="text" placeholder="Código (ex: A1B2C3D4)" autocomplete="off" maxlength="8" />
+        <button id="btnRedeemTokenRequest" class="btn btn-primary" type="button">Resgatar</button>
       </div>
     </section>
 

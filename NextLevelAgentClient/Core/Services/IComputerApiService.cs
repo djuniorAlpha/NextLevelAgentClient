@@ -47,6 +47,12 @@ namespace NextLevelAgentClient.Core.Services
         Task<PixPaymentStatus> GetPaymentStatusAsync(string apiKey, string paymentId);
 
         /// <summary>
+        /// Redeems a leftover Pix token code (from a previous, not fully consumed payment) and starts
+        /// a new session on this machine with whatever time remains on it.
+        /// </summary>
+        Task<RedeemTokenResult> RedeemPixTokenAsync(string computerUuid, string apiKey, string code);
+
+        /// <summary>
         /// Logs a customer in (username/password), returning a token to start a session with.
         /// NOTE: backend endpoint not implemented yet as of 2026-08-13 - see CustomerSession.cs.
         /// </summary>

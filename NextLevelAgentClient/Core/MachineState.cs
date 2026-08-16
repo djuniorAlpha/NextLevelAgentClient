@@ -12,6 +12,7 @@ namespace NextLevelAgentClient.Core
         TimeSelection,
         Login,
         ChangePassword,
+        RedeemToken,
         WaitingForPix,
         ActiveSession
     }

@@ -12,7 +12,7 @@ namespace NextLevelAgentClient.Core.Services
     {
         private readonly SocketIO _socket;
 
-        public event Action<string>? OnPaymentConfirmed;
+        public event Action<string, string?>? OnPaymentConfirmed;
 
         /// <summary>
         /// Disparado quando o admin manda uma ação remota pelo painel: "lock", "unlock" ou "shutdown".
@@ -33,7 +33,7 @@ namespace NextLevelAgentClient.Core.Services
             {
                 PaymentConfirmedPayload? payload = ctx.GetValue<PaymentConfirmedPayload>(0);
                 if (payload != null)
-                    OnPaymentConfirmed?.Invoke(payload.PaymentId);
+                    OnPaymentConfirmed?.Invoke(payload.PaymentId, payload.TokenCode);
                 return Task.CompletedTask;
             });
 
@@ -61,7 +61,9 @@ namespace NextLevelAgentClient.Core.Services
             _socket.Dispose();
         }
 
-        private sealed record PaymentConfirmedPayload([property: JsonPropertyName("paymentId")] string PaymentId);
+        private sealed record PaymentConfirmedPayload(
+            [property: JsonPropertyName("paymentId")] string PaymentId,
+            [property: JsonPropertyName("tokenCode")] string? TokenCode);
 
         private sealed record ForceActionPayload([property: JsonPropertyName("action")] string Action);
     }

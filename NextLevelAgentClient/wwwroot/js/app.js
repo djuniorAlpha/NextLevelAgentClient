@@ -7,6 +7,7 @@
     WaitingForPix: document.getElementById("panel-pix"),
     Login: document.getElementById("panel-login"),
     ChangePassword: document.getElementById("panel-change-password"),
+    RedeemToken: document.getElementById("panel-redeem-token"),
   };
 
   const btnBack = document.getElementById("btnBack");
@@ -41,6 +42,7 @@
   const txtPassword = document.getElementById("txtPassword");
   const txtNewPassword = document.getElementById("txtNewPassword");
   const txtConfirmPassword = document.getElementById("txtConfirmPassword");
+  const txtRedeemCode = document.getElementById("txtRedeemCode");
 
   const MAX_HOURLY_HOURS = 12;
   let selectedHourlyRate = null;
@@ -154,6 +156,7 @@
     txtPassword.value = "";
     txtNewPassword.value = "";
     txtConfirmPassword.value = "";
+    txtRedeemCode.value = "";
   }
 
   function resetPixPanel() {
@@ -239,7 +242,16 @@
 
   document.getElementById("btnBuyTime").addEventListener("click", () => send("buyTime"));
   document.getElementById("btnLogin").addEventListener("click", () => send("login"));
+  document.getElementById("btnRedeemToken").addEventListener("click", () => send("redeemToken"));
   document.getElementById("btnBack").addEventListener("click", () => send("back"));
+
+  txtRedeemCode.addEventListener("input", () => {
+    txtRedeemCode.value = txtRedeemCode.value.toUpperCase();
+  });
+
+  document.getElementById("btnRedeemTokenRequest").addEventListener("click", () => {
+    send("redeemTokenRequest", { code: txtRedeemCode.value });
+  });
 
   document.getElementById("btnLoginRequest").addEventListener("click", () => {
     send("loginRequest", {
