@@ -11,7 +11,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="Images\Logo.jpeg">
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
+    <PackageReference Include="SocketIOClient" Version="4.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="wwwroot\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
