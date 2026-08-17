@@ -38,9 +38,9 @@ namespace NextLevelAgentClient.Core
             OnStateChanged?.Invoke(newState);
         }
 
-        public void ConfirmLogin()
+        public void ConfirmLogin(int allocatedSeconds)
         {
-            RemainingSessionTime = 30;
+            RemainingSessionTime = allocatedSeconds;
             _sessionTimer.Start();
             ChangeState(MachineState.ActiveSession);
         }
@@ -59,6 +59,18 @@ namespace NextLevelAgentClient.Core
             _pixTimer.Stop();
             _sessionTimer.Stop();
             ChangeState(MachineState.InitialBlocked);
+        }
+
+        /// <summary>
+        /// Libera a estação sem cobrança e sem tempo determinado (force-unlock do admin) -
+        /// fica em sessão ativa "aberta" até o admin bloquear de novo.
+        /// </summary>
+        public void ForceUnlock()
+        {
+            _pixTimer.Stop();
+            _sessionTimer.Stop();
+            RemainingSessionTime = 0;
+            ChangeState(MachineState.ActiveSession);
         }
 
         public void ConfirmPixPayment()

@@ -11,6 +11,8 @@ namespace NextLevelAgentClient.Core
         InitialBlocked,
         TimeSelection,
         Login,
+        ChangePassword,
+        RedeemToken,
         WaitingForPix,
         ActiveSession
     }

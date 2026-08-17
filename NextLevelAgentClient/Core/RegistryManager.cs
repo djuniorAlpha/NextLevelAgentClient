@@ -12,26 +12,24 @@ namespace NextLevelAgentClient.Core
         private const string REGISTRY_PATH = @"Software\Microsoft\Windows\CurrentVersion\Policies\System";
         private const string VALUE_NAME = "DisableTaskMgr";
 
-        public static void LockManagerTask() {
+        /// <summary>
+        /// Tenta bloquear o Gerenciador de Tarefas via registro.
+        /// </summary>
+        /// <returns>false se faltarem privilégios de Administrador; true caso contrário.</returns>
+        public static bool LockManagerTask() {
             try
             {
-                using RegistryKey key = Registry.CurrentUser.CreateSubKey(REGISTRY_PATH);
-                if (key != null)
-                {
-                    key.SetValue(VALUE_NAME, 1, RegistryValueKind.DWord);
-                }
+                using RegistryKey? key = Registry.CurrentUser.CreateSubKey(REGISTRY_PATH);
+                key?.SetValue(VALUE_NAME, 1, RegistryValueKind.DWord);
+                return true;
             }
             catch (UnauthorizedAccessException)
             {
-                MessageBox.Show(
-                    "Erro: O Agente precisa de privilégios de Administrador para bloquear o Gerenciador de Tarefas.",
-                    "Erro de Privilégios",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
+                return false;
             }
             catch (Exception ex) {
                 Console.WriteLine($"Erro ao acessar o registro: {ex.Message}");
+                return true;
             }
         }
 

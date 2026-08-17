@@ -1,88 +1,523 @@
-﻿
+
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 using NextLevelAgentClient.Core;
 using NextLevelAgentClient.Core.Services;
 using NextLevelAgentClient.Infrastructure;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Text.Json;
 
 namespace NextLevelAgentClient
 {
     public partial class LockForm : Form
     {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
         private readonly SessionManager _session;
         private readonly IComputerApiService _apiService;
 
         private bool _allowClose = false;
         private string _computerUuid = string.Empty;
+        private string? _apiKey;
+        private int? _machineNumber;
+        private string? _currentPaymentId;
+        private string? _pendingCustomerToken;
+        private string? _activeSessionId;
+        private int _activeSessionAllocatedSeconds;
 
-        // UI Components
-        private Panel? mainPanel;
-        private Panel? pnlBlocked, pnlTimeSelection, pnlPix, pnlLogin;
-        private Label? lblTitle, lblStatus, lblInstructions, lblTimeSubtitle, lblPixSubtitle, lblPixCounter, lblLogin;
-        private FlowLayoutPanel? timeOptionsContainer;
-        private Button? btnBuyTime, btnBack, btnSimulatePayment, btnLogin, btnLoginRequest;
-        private TextBox? txtPixCode, txtUsername, txtPassword;
+        private WebView2? webView;
         private NotifyIcon? trayIcon;
+        private System.Windows.Forms.Timer? _heartbeatTimer;
+        private RealtimeClient? _realtimeClient;
 
         public LockForm()
         {
             InitializeComponent();
 
             _session = new SessionManager();
-            _apiService = new MockComputerApiService();
-
+            _apiService = new ComputerApiService(AppConfig.Current.BackendBaseUrl);
 
             BindSessionEvents();
 
             ConfigureLockScreen();
-            CreateVisualComponents();
             ConfigureTrayIcon();
 
             KeyboardHook.OnDeveloperExit += HandleDeveloperExit;
         }
 
-        private async Task SynchronizeHardwareAsync()
+        private async Task InitializeWebViewAsync()
         {
-            lblStatus?.Text = "SYNCHRONIZING WITH SERVER...";
-            lblStatus?.ForeColor = Color.Orange;
-            btnBuyTime?.Enabled = false;
+            webView = new WebView2 { Dock = DockStyle.Fill };
+            this.Controls.Add(webView);
+
+            await webView.EnsureCoreWebView2Async();
+
+            CoreWebView2 core = webView.CoreWebView2;
+            core.Settings.AreDefaultContextMenusEnabled = false;
+            core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+            core.Settings.IsZoomControlEnabled = false;
+#if !DEBUG
+            core.Settings.AreDevToolsEnabled = false;
+#endif
+
+            string webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+            core.SetVirtualHostNameToFolderMapping("appassets", webRoot, CoreWebView2HostResourceAccessKind.Allow);
+            core.WebMessageReceived += OnWebMessageReceived;
+
+            // Navigate() não espera a página carregar: sem isso, mensagens postadas logo em seguida
+            // (ex.: machineNumber) podem chegar antes do app.js registrar o listener e se perder.
+            var navigationCompleted = new TaskCompletionSource();
+            void OnNavigationCompleted(object? s, CoreWebView2NavigationCompletedEventArgs e) => navigationCompleted.TrySetResult();
+            core.NavigationCompleted += OnNavigationCompleted;
+
+            core.Navigate("https://appassets/index.html");
+            await navigationCompleted.Task;
+            core.NavigationCompleted -= OnNavigationCompleted;
+        }
+
+        private void PostToJs(object payload)
+        {
+            webView?.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(payload, JsonOptions));
+        }
+
+        private void ShowAlert(string alertType, string title, string message)
+        {
+            PostToJs(new { type = "alert", alertType, title, text = message });
+        }
+
+        private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            string? json = e.TryGetWebMessageAsString();
+            if (string.IsNullOrEmpty(json)) return;
+
+            WebMessage? msg;
+            try
+            {
+                msg = JsonSerializer.Deserialize<WebMessage>(json, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                return;
+            }
+
+            if (msg == null) return;
+
+            switch (msg.Action)
+            {
+                case "buyTime": _session.ChangeState(MachineState.TimeSelection); break;
+                case "login": _session.ChangeState(MachineState.Login); break;
+                case "loginRequest": HandleLoginRequest(msg.Username, msg.Password); break;
+                case "changePasswordRequest": HandleChangePasswordRequest(msg.NewPassword, msg.ConfirmPassword); break;
+                case "back": HandleBack(); break;
+                case "selectTime": HandleSelectTime(msg); break;
+                case "redeemToken": _session.ChangeState(MachineState.RedeemToken); break;
+                case "redeemTokenRequest": HandleRedeemTokenRequest(msg.Code); break;
+            }
+        }
+
+        private async void HandleSelectTime(WebMessage msg)
+        {
+            _session.StartPixExpectancy(msg.Minutes);
+
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível gerar a cobrança: máquina não está sincronizada com o servidor.");
+                _session.CancelOperation();
+                return;
+            }
 
             try
             {
-                string macAddress = GetLocalMacAddress();
-                string hostname = Dns.GetHostName();
-                string ipAddress = GetLocalIpAddress();
+                string? timePackageId = msg.Kind == "package" ? msg.OptionId : null;
+                string? hourlyRateId = msg.Kind == "hourly" ? msg.OptionId : null;
 
-                bool isRegistered = await _apiService.IsComputerRegisteredAsync(macAddress);
+                PixPaymentResult result = await _apiService.CreatePixPaymentAsync(_computerUuid, _apiKey, timePackageId, hourlyRateId, msg.Minutes);
+                _currentPaymentId = result.PaymentId;
 
-                if (!isRegistered)
+                PostToJs(new { type = "pixData", qrCodeBase64 = result.QrCodeBase64, qrCodeText = result.QrCodeText, amountCents = result.AmountCents });
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Falha ao gerar cobrança", $"Não foi possível gerar a cobrança Pix: {ex.Message}");
+                _session.CancelOperation();
+            }
+        }
+
+        private async void HandleLoginRequest(string? username, string? password)
+        {
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            {
+                ShowAlert("error", "Erro de Login", "Informe usuário e senha.");
+                return;
+            }
+
+            try
+            {
+                CustomerLoginResult login = await _apiService.LoginCustomerAsync(username, password);
+
+                if (login.Customer.MustChangePassword)
                 {
-                    lblStatus?.Text = "HARDWARE NOT FOUND. REGISTERING...";
-                    _computerUuid = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
-                    lblStatus?.Text = "REGISTRATION SUCCESSFUL!";
-                    lblStatus?.ForeColor = Color.Green;
+                    _pendingCustomerToken = login.AccessToken;
+                    _session.ChangeState(MachineState.ChangePassword);
+                    return;
+                }
+
+                await StartCustomerSessionAsync(login.AccessToken);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro de Login", ex.Message);
+            }
+        }
+
+        private async void HandleChangePasswordRequest(string? newPassword, string? confirmPassword)
+        {
+            if (string.IsNullOrEmpty(_pendingCustomerToken))
+            {
+                ShowAlert("error", "Sessão expirada", "Faça login novamente.");
+                _session.ChangeState(MachineState.Login);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+            {
+                ShowAlert("error", "Senha inválida", "A nova senha precisa ter pelo menos 6 caracteres.");
+                return;
+            }
+
+            if (newPassword != confirmPassword)
+            {
+                ShowAlert("error", "Senhas não conferem", "A confirmação precisa ser igual à nova senha.");
+                return;
+            }
+
+            try
+            {
+                ChangePasswordResult result = await _apiService.ChangeCustomerPasswordAsync(_pendingCustomerToken, newPassword);
+                string token = result.AccessToken ?? _pendingCustomerToken;
+                _pendingCustomerToken = null;
+
+                await StartCustomerSessionAsync(token);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro ao trocar senha", ex.Message);
+            }
+        }
+
+        private async Task StartCustomerSessionAsync(string customerAccessToken)
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível iniciar a sessão: máquina não está sincronizada com o servidor.");
+                return;
+            }
+
+            try
+            {
+                StartSessionResult session = await _apiService.StartSessionForCustomerAsync(_computerUuid, _apiKey, customerAccessToken);
+                _activeSessionId = session.SessionId;
+                _activeSessionAllocatedSeconds = session.AllocatedSeconds;
+                _session.ConfirmLogin(session.AllocatedSeconds);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Erro ao iniciar sessão", ex.Message);
+            }
+        }
+
+        private async void HandleRedeemTokenRequest(string? code)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                ShowAlert("error", "Código inválido", "Informe o código do seu Pix.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+            {
+                ShowAlert("error", "Sem conexão", "Não foi possível validar o código: máquina não está sincronizada com o servidor.");
+                return;
+            }
+
+            try
+            {
+                RedeemTokenResult result = await _apiService.RedeemPixTokenAsync(_computerUuid, _apiKey, code);
+                _activeSessionId = result.SessionId;
+                _activeSessionAllocatedSeconds = result.AllocatedSeconds;
+                _session.ConfirmLogin(result.AllocatedSeconds);
+            }
+            catch (Exception ex)
+            {
+                ShowAlert("error", "Código inválido", ex.Message);
+            }
+        }
+
+        // Reporta ao backend quanto tempo foi de fato consumido numa sessão de cliente logado,
+        // pra descontar do saldo. Best-effort: não interrompe o fluxo se falhar.
+        private async Task ReportSessionEndIfNeededAsync()
+        {
+            if (string.IsNullOrEmpty(_activeSessionId) || string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey))
+                return;
+
+            string sessionId = _activeSessionId;
+            int consumedSeconds = Math.Max(0, _activeSessionAllocatedSeconds - _session.RemainingSessionTime);
+            _activeSessionId = null;
+
+            bool ok = await _apiService.EndSessionAsync(_computerUuid, _apiKey, sessionId, consumedSeconds);
+            if (!ok) Debug.WriteLine("Falha ao reportar fim de sessão.");
+        }
+
+        private void HandleBack()
+        {
+            if (_session.CurrentState == MachineState.WaitingForPix)
+            {
+                _session.CancelOperation();
+                _currentPaymentId = null;
+            }
+            else
+            {
+                _pendingCustomerToken = null;
+                _session.ChangeState(MachineState.InitialBlocked);
+            }
+        }
+
+        private async Task SynchronizeHardwareAsync()
+        {
+            PostToJs(new { type = "status", text = "SINCRONIZANDO COM O SERVIDOR...", color = "warning" });
+
+            string macAddress = GetLocalMacAddress();
+
+            try
+            {
+                MachineCredentials? stored = MachineCredentialsStore.Load();
+
+                if (stored != null && stored.MacAddress == macAddress)
+                {
+                    _computerUuid = stored.ComputerUuid;
+                    _apiKey = stored.ApiKey;
+                    _machineNumber = stored.MachineNumber;
+
+                    PostToJs(new { type = "status", text = "MÁQUINA VERIFICADA", color = "success" });
                     await Task.Delay(1000);
                 }
                 else
                 {
-                    lblStatus?.Text = "MACHINE RECORD VERIFIED";
-                    lblStatus?.ForeColor = Color.Green;
-                    await Task.Delay(1000);
+                    string hostname = Dns.GetHostName();
+                    string ipAddress = GetLocalIpAddress();
+
+                    MachineRegistration? registration = await _apiService.GetRegistrationAsync(macAddress);
+
+                    if (registration == null)
+                    {
+                        PostToJs(new { type = "status", text = "HARDWARE NÃO ENCONTRADO. REGISTRANDO...", color = "warning" });
+                        registration = await _apiService.RegisterComputerAsync(macAddress, hostname, ipAddress);
+
+                        if (string.IsNullOrEmpty(registration.ApiKey))
+                            throw new InvalidOperationException("Backend não retornou a chave de API no registro.");
+
+                        _apiKey = registration.ApiKey;
+                        MachineCredentialsStore.Save(new MachineCredentials(registration.ComputerUuid, registration.ApiKey, registration.MachineNumber, macAddress));
+
+                        PostToJs(new { type = "status", text = "REGISTRO CONCLUÍDO!", color = "success" });
+                        await Task.Delay(1000);
+                    }
+                    else
+                    {
+                        // Já existe na base do backend, mas sem chave local (ex.: reinstalação do Windows).
+                        // Sem endpoint pra reemitir a chave, a máquina fica identificada mas sem heartbeat autenticado.
+                        _computerUuid = registration.ComputerUuid;
+                        _machineNumber = registration.MachineNumber;
+                        PostToJs(new { type = "machineNumber", number = _machineNumber });
+                        ShowAlert("error", "Credenciais ausentes", "Esta máquina já está registrada no servidor, mas a chave de acesso local não foi encontrada. Contate o administrador para reemitir a chave.");
+                        return;
+                    }
+
+                    _computerUuid = registration.ComputerUuid;
+                    _machineNumber = registration.MachineNumber;
                 }
+
+                PostToJs(new { type = "machineNumber", number = _machineNumber });
+                StartHeartbeat();
+                await LoadPricingOptionsAsync();
+                await ConnectRealtimeAsync();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Critical Network Error during hardware synchronization: {ex.Message}",
-                                "Sync Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                lblStatus?.Text = "OFFLINE MODE ACTIVE";
-                lblStatus?.ForeColor = Color.DarkOrange;
+                ShowAlert("error", "Falha de Sincronização", $"Erro crítico de rede durante a sincronização do hardware: {ex.Message}");
+                PostToJs(new { type = "status", text = "MODO OFFLINE ATIVO", color = "warning" });
             }
             finally
             {
-                // Restore UI state to standard blocked screen layout
-                lblStatus?.Text = "THIS MACHINE IS LOCKED";
-                lblStatus?.ForeColor = Color.Red;
-                btnBuyTime?.Enabled = true;
+                PostToJs(new { type = "status", text = "ESTA MÁQUINA ESTÁ BLOQUEADA", color = "danger" });
+            }
+        }
+
+        private async Task LoadPricingOptionsAsync()
+        {
+            try
+            {
+                IReadOnlyList<TimePackageDto> packages = await _apiService.GetTimePackagesAsync();
+                IReadOnlyList<HourlyRateDto> hourlyRates = await _apiService.GetHourlyRatesAsync();
+
+                PostToJs(new
+                {
+                    type = "pricingOptions",
+                    packages = packages.Select(p => new { id = p.Id, label = p.Label, minutes = p.Minutes, priceCents = p.PriceCents }),
+                    hourlyRates = hourlyRates.Select(r => new { id = r.Id, label = r.Label, ratePerHourCents = r.RatePerHourCents }),
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao carregar pacotes/tarifas: {ex.Message}");
+                PostToJs(new { type = "pricingOptions", packages = Array.Empty<object>(), hourlyRates = Array.Empty<object>() });
+            }
+        }
+
+        private void StartHeartbeat()
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey)) return;
+
+            _heartbeatTimer ??= new System.Windows.Forms.Timer { Interval = 10_000 };
+            _heartbeatTimer.Tick -= OnHeartbeatTick;
+            _heartbeatTimer.Tick += OnHeartbeatTick;
+            _heartbeatTimer.Start();
+        }
+
+        private async void OnHeartbeatTick(object? sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(_computerUuid) || string.IsNullOrEmpty(_apiKey)) return;
+
+            string status = MapStateToBackendStatus(_session.CurrentState);
+            bool ok = await _apiService.SendHeartbeatAsync(_computerUuid, _apiKey, status);
+            if (!ok) Debug.WriteLine("Heartbeat falhou.");
+        }
+
+        private static string MapStateToBackendStatus(MachineState state) => state switch
+        {
+            MachineState.TimeSelection => "time_selection",
+            MachineState.WaitingForPix => "waiting_pix",
+            MachineState.ActiveSession => "active",
+            _ => "locked",
+        };
+
+        private async Task ConnectRealtimeAsync()
+        {
+            if (string.IsNullOrEmpty(_apiKey)) return;
+
+            try
+            {
+                _realtimeClient = new RealtimeClient(AppConfig.Current.BackendBaseUrl, _apiKey);
+                _realtimeClient.OnPaymentConfirmed += HandlePaymentConfirmedFromSocket;
+                _realtimeClient.OnForceAction += HandleForceActionFromSocket;
+                await _realtimeClient.ConnectAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao conectar ao WebSocket de tempo real: {ex.Message}");
+            }
+        }
+
+        // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
+        private void HandlePaymentConfirmedFromSocket(string paymentId, string? tokenCode, string? sessionId)
+        {
+            if (paymentId != _currentPaymentId) return;
+            this.BeginInvoke(new MethodInvoker(() => CompletePixPayment(tokenCode, sessionId)));
+        }
+
+        private void CompletePixPayment(string? tokenCode, string? sessionId)
+        {
+            if (_session.CurrentState != MachineState.WaitingForPix) return;
+            _currentPaymentId = null;
+
+            // O backend já abre a sessão nesta máquina vinculada ao token assim que aprova o Pix.
+            // Guardamos o id pra poder reportar quanto foi consumido lá na frente (ReportSessionEndIfNeededAsync),
+            // o que faz o backend descontar do saldo do token - sem isso, o saldo nunca decrementaria
+            // para quem paga e usa o tempo na própria máquina (só funcionaria pro resgate em outra máquina).
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                _activeSessionId = sessionId;
+                _activeSessionAllocatedSeconds = _session.RemainingSessionTime;
+            }
+
+            // Todo pagamento Pix aprovado gera um código de saldo restante - se o cliente não usar
+            // todo o tempo, esse código pode ser resgatado depois em qualquer máquina via
+            // "Tenho um código" (start-with-token).
+            if (!string.IsNullOrEmpty(tokenCode))
+                ShowPixTokenCode(tokenCode);
+
+            _session.ConfirmPixPayment();
+        }
+
+        private void ShowPixTokenCode(string tokenCode)
+        {
+            try { Clipboard.SetText(tokenCode); } catch { /* melhor esforço: área de transferência pode estar indisponível */ }
+
+            MessageBox.Show(
+                this,
+                $"Guarde este código: {tokenCode}\n\nSe sobrar tempo não utilizado ao final da sua sessão, use-o em qualquer computador desta lan house para continuar de onde parou.\n\n(Já copiado para a área de transferência.)",
+                "Seu código Pix",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        // Chamado pela biblioteca Socket.IO numa thread própria - precisa voltar pra thread da UI.
+        private void HandleForceActionFromSocket(string action)
+        {
+            this.BeginInvoke(new MethodInvoker(() => HandleForceAction(action)));
+        }
+
+        private async void HandleForceAction(string action)
+        {
+            switch (action)
+            {
+                case "lock":
+                    _currentPaymentId = null;
+                    await ReportSessionEndIfNeededAsync();
+                    _session.CancelOperation();
+                    trayIcon?.Visible = false;
+                    ConfigureLockScreen();
+                    this.Show();
+                    ShowAlert("warning", "Bloqueado", "Esta máquina foi bloqueada pelo atendente.");
+                    break;
+                case "unlock":
+                    _currentPaymentId = null;
+                    await ReportSessionEndIfNeededAsync();
+                    _session.ForceUnlock();
+                    break;
+                case "shutdown":
+                    // Precisa terminar de reportar ANTES de desligar: "shutdown /t 0" derruba o processo
+                    // imediatamente, então um fire-and-forget aqui nunca chegaria a sair da máquina.
+                    await ReportSessionEndIfNeededAsync();
+                    try
+                    {
+                        Process.Start("shutdown", "/s /t 0 /f");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Falha ao desligar a máquina: {ex.Message}");
+                    }
+                    break;
+            }
+        }
+
+        // Fallback caso o WebSocket falhe: consulta o status a cada 5s enquanto aguarda o Pix.
+        private async void HandlePixTickPoll(TimeSpan remaining)
+        {
+            if (string.IsNullOrEmpty(_currentPaymentId) || string.IsNullOrEmpty(_apiKey)) return;
+            if ((int)remaining.TotalSeconds % 5 != 0) return;
+
+            try
+            {
+                PixPaymentStatus status = await _apiService.GetPaymentStatusAsync(_apiKey, _currentPaymentId);
+                if (status.Status == "approved")
+                    CompletePixPayment(status.PixToken?.Code, status.Session?.Id);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Falha ao consultar status do pagamento: {ex.Message}");
             }
         }
 
@@ -119,11 +554,16 @@ namespace NextLevelAgentClient
 
         private void BindSessionEvents()
         {
-            _session.OnStateChanged += RenderState;
-            _session.OnPixTick += (time) => lblPixCounter?.Text = $"QR Code expira em: {time:mm\\:ss}";
-            _session.OnSessionTick += (time) => trayIcon?.Text = $"CyberManager - Tempo: {time:hh\\:mm\\:ss}";
+            _session.OnStateChanged += HandleStateChanged;
+            _session.OnPixTick += (time) => PostToJs(new { type = "pixTick", text = $"{time:mm\\:ss}" });
+            _session.OnPixTick += HandlePixTickPoll;
+            _session.OnSessionTick += (time) => trayIcon?.Text = $"Next Level Gaming House - Tempo: {time:hh\\:mm\\:ss}";
 
-            _session.OnPixExpired += () => MessageBox.Show("O tempo limite para o pagamento expirou. Gerando nova sessão.", "Pix Expirado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _session.OnPixExpired += () =>
+            {
+                _currentPaymentId = null;
+                ShowAlert("warning", "Pix Expirado", "O tempo limite para o pagamento expirou. Gerando nova sessão.");
+            };
             _session.OnSessionEnded += HandleSessionEnded;
 
             _session.OnSessionTick += (time) =>
@@ -133,14 +573,9 @@ namespace NextLevelAgentClient
             };
         }
 
-        private void RenderState(MachineState state)
+        private void HandleStateChanged(MachineState state)
         {
-            pnlBlocked?.Visible = (state == MachineState.InitialBlocked);
-            pnlTimeSelection?.Visible = (state == MachineState.TimeSelection);
-            pnlPix?.Visible = (state == MachineState.WaitingForPix);
-            pnlLogin?.Visible = (state == MachineState.Login);
-
-            btnBack?.Visible = (state != MachineState.ActiveSession && state != MachineState.InitialBlocked);
+            PostToJs(new { type = "state", state = state.ToString() });
 
             if (state == MachineState.ActiveSession)
             {
@@ -150,51 +585,16 @@ namespace NextLevelAgentClient
             }
         }
 
-        private void HandleSessionEnded()
+        private async void HandleSessionEnded()
         {
+            await ReportSessionEndIfNeededAsync();
+
             trayIcon?.Visible = false;
             ConfigureLockScreen();
             this.Show();
 
-            MessageBox.Show("Seu tempo acabou! O computador será bloqueado.", "Sessão Encerrada", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowAlert("warning", "Sessão Encerrada", "Seu tempo acabou! O computador será bloqueado.");
         }
-
-        private void BtnBuyTime_Click(object? sender, EventArgs e) => _session.ChangeState(MachineState.TimeSelection);
-
-        private void BtnLogin_Click(object? sender, EventArgs e) => _session.ChangeState(MachineState.Login);
-
-        private void BtnLoginRequest_Click(object? sender, EventArgs e)
-        {
-            if (txtUsername?.Text == "admin" && txtPassword?.Text == "admin")
-            {
-                _session.ConfirmLogin();
-            }
-            else
-            {
-                MessageBox.Show("Credenciais inválidas. Tente novamente.", "Erro de Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private void BtnBack_Click(object? sender, EventArgs e)
-        {
-            if (_session.CurrentState == MachineState.WaitingForPix)
-                _session.CancelOperation();
-            else if (_session.CurrentState == MachineState.TimeSelection)
-                _session.ChangeState(MachineState.InitialBlocked);
-            else
-                _session.ChangeState(MachineState.InitialBlocked);
-
-        }
-
-        private void TimeOption_Click(object? sender, EventArgs e)
-        {
-            if (sender is Button btn && btn.Tag is int minutes)
-            {
-                _session.StartPixExpectancy(minutes);
-            }
-        }
-
-        private void BtnSimulatePayment_Click(object? sender, EventArgs e) => _session.ConfirmPixPayment();
 
         private void ConfigureLockScreen()
         {
@@ -206,103 +606,60 @@ namespace NextLevelAgentClient
             this.BackColor = Color.FromArgb(15, 15, 25);
         }
 
+        private void ConfigureTrayIcon()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Items.Add("Encerrar sessão", null, HandleEndSessionRequestedByUser);
 
-        private void ConfigureTrayIcon() => trayIcon = new NotifyIcon { Icon = SystemIcons.Information, Visible = false };
+            trayIcon = new NotifyIcon { Icon = LoadTrayIcon(), Visible = false, ContextMenuStrip = menu };
+        }
 
-        private static Image? LoadLogoImage()
+        // Item do menu do tray icon: permite ao próprio cliente encerrar a sessão ativa e bloquear
+        // a máquina, sem depender de uma ação remota do atendente.
+        private async void HandleEndSessionRequestedByUser(object? sender, EventArgs e)
+        {
+            if (_session.CurrentState != MachineState.ActiveSession) return;
+
+            DialogResult confirm = MessageBox.Show(
+                "Deseja realmente encerrar sua sessão agora? A máquina será bloqueada.",
+                "Encerrar sessão",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes) return;
+
+            await ReportSessionEndIfNeededAsync();
+
+            _currentPaymentId = null;
+            _session.CancelOperation();
+            trayIcon!.Visible = false;
+            ConfigureLockScreen();
+            this.Show();
+            ShowAlert("info", "Sessão encerrada", "Sua sessão foi encerrada. Obrigado por jogar com a gente!");
+        }
+
+        private static Icon LoadTrayIcon()
         {
             try
             {
-                string path = Path.Combine(AppContext.BaseDirectory, "Images", "Logo.jpeg");
-                return File.Exists(path) ? Image.FromFile(path) : null;
+                string path = Path.Combine(AppContext.BaseDirectory, "wwwroot", "assets", "tray-icon.ico");
+                return File.Exists(path) ? new Icon(path) : SystemIcons.Information;
             }
             catch
             {
-                return null;
+                return SystemIcons.Information;
             }
         }
 
-        private void CreateVisualComponents()
-        {
-            this.SuspendLayout();
-
-            mainPanel = new Panel { Size = new Size(500, 600), BackColor = Color.FromArgb(24, 24, 38) };
-            mainPanel.Location = new Point((this.Width - mainPanel.Width) / 2, (this.Height - mainPanel.Height) / 2);
-            mainPanel.SuspendLayout();
-            this.Controls.Add(mainPanel);
-
-            var pictureBox = new PictureBox { Name = "pictureBoxLogo", Size = new Size(50, 60), Location = new Point(40, 40), SizeMode = PictureBoxSizeMode.Zoom, Image = LoadLogoImage() };
-            mainPanel.Controls.Add(pictureBox);
-
-            lblTitle = new Label { Text = "CyberManager", Font = new Font("Segoe UI", 28, FontStyle.Bold), ForeColor = Color.White, Size = new Size(400, 60), Location = new Point(50, 40), TextAlign = ContentAlignment.MiddleCenter };
-            mainPanel.Controls.Add(lblTitle);
-
-            var size = new Size(mainPanel.Width, 500);
-            var panelBounds = new Rectangle(Point.Empty, size);
-
-            // Estado: InitialBlocked
-            pnlBlocked = new Panel { Bounds = panelBounds };
-            lblStatus = new Label { Text = "ESTA MÁQUINA ESTÁ BLOQUEADA", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = Color.Red, Size = new Size(mainPanel.Width, 30), Location = new Point(0, 130), TextAlign = ContentAlignment.MiddleCenter }; pnlBlocked.Controls.Add(lblStatus);
-            lblInstructions = new Label { Text = "Para liberar o acesso e começar a navegar, clique no botão abaixo para escolher seu tempo e realizar o pagamento via Pix.", Font = new Font("Segoe UI", 11), ForeColor = Color.LightGray, Size = new Size(mainPanel.Width - 80, 60), Location = new Point(40, 200), TextAlign = ContentAlignment.MiddleCenter };
-            pnlBlocked.Controls.Add(lblInstructions);
-
-            btnLogin = new Button { Text = "🔑 LOGIN", Font = new Font("Segoe UI", 14, FontStyle.Bold), BackColor = Color.DarkBlue, ForeColor = Color.White, Size = new Size(300, 60), Location = new Point(100, 400), FlatStyle = FlatStyle.Flat };
-            btnLogin.Click += BtnLogin_Click;
-            pnlBlocked.Controls.Add(btnLogin);
-
-            btnBuyTime = new Button { Text = "🛒 COMPRAR TEMPO", Font = new Font("Segoe UI", 14, FontStyle.Bold), BackColor = Color.Green, ForeColor = Color.White, Size = new Size(300, 60), Location = new Point(100, 300), FlatStyle = FlatStyle.Flat };
-            btnBuyTime.Click += BtnBuyTime_Click;
-            pnlBlocked.Controls.Add(btnBuyTime);
-            mainPanel.Controls.Add(pnlBlocked);
-
-            // Estado: TimeSelection
-            pnlTimeSelection = new Panel { Bounds = panelBounds, Visible = false };
-            lblTimeSubtitle = new Label { Text = "Selecione o tempo de uso desejado:", Font = new Font("Segoe UI", 14), ForeColor = Color.White, Size = new Size(mainPanel.Width, 40), Location = new Point(0, 120), TextAlign = ContentAlignment.MiddleCenter }; pnlTimeSelection.Controls.Add(lblTimeSubtitle);
-            timeOptionsContainer = new FlowLayoutPanel { Size = new Size(400, 200), Location = new Point(50, 180) }; pnlTimeSelection.Controls.Add(timeOptionsContainer);
-
-            Button btn1Min = new Button { Text = "1 Minute (Test) - R$ 0,10", Size = new Size(380, 50), BackColor = Color.DimGray, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Tag = 1 };
-            btn1Min.Click += TimeOption_Click;
-            timeOptionsContainer.Controls.Add(btn1Min);
-            mainPanel.Controls.Add(pnlTimeSelection);
-
-            // Estado: WaitingForPix
-            pnlPix = new Panel { Bounds = panelBounds, Visible = false };
-            lblPixSubtitle = new Label { Text = "Escaneie o QR Code para pagar", Font = new Font("Segoe UI", 14), ForeColor = Color.White, Size = new Size(mainPanel.Width, 30), Location = new Point(0, 110), TextAlign = ContentAlignment.MiddleCenter }; pnlPix.Controls.Add(lblPixSubtitle);
-            txtPixCode = new TextBox { Text = "[ QR CODE PIX ]", Location = new Point(50, 320), Size = new Size(300, 25) }; pnlPix.Controls.Add(txtPixCode);
-            lblPixCounter = new Label { Text = "O QR Code expira em: 05:00", ForeColor = Color.Orange, Location = new Point(0, 360), Size = new Size(mainPanel.Width, 25), TextAlign = ContentAlignment.MiddleCenter }; pnlPix.Controls.Add(lblPixCounter);
-
-            btnSimulatePayment = new Button { Text = "🟢 SIMULAR: PIX PAGO", BackColor = Color.Blue, ForeColor = Color.White, Location = new Point(100, 400), Size = new Size(300, 45), FlatStyle = FlatStyle.Flat };
-            btnSimulatePayment.Click += BtnSimulatePayment_Click;
-            pnlPix.Controls.Add(btnSimulatePayment);
-            mainPanel.Controls.Add(pnlPix);
-
-            // Estado: Login
-            pnlLogin = new Panel { Bounds = panelBounds, Visible = false };
-            lblLogin = new Label { Text = "Faça login", Font = new Font("Segoe UI", 10), ForeColor = Color.LightGray, Size = new Size(mainPanel.Width, 30), Location = new Point(0, 500), TextAlign = ContentAlignment.MiddleCenter };
-            txtUsername = new TextBox { PlaceholderText = "Usuário", Location = new Point(100, 320), Size = new Size(300, 25) };
-            txtPassword = new TextBox { PlaceholderText = "Senha", Location = new Point(100, 360), Size = new Size(300, 25), PasswordChar = '*' };
-            btnLoginRequest = new Button { Text = "Login", BackColor = Color.DarkGreen, ForeColor = Color.White, Location = new Point(100, 390), Size = new Size(300, 30), FlatStyle = FlatStyle.Flat };
-            btnLoginRequest.Click += BtnLoginRequest_Click;
-
-            pnlLogin.Controls.Add(lblLogin);
-            pnlLogin.Controls.Add(txtUsername);
-            pnlLogin.Controls.Add(txtPassword);
-            pnlLogin.Controls.Add(btnLoginRequest);
-            mainPanel.Controls.Add(pnlLogin);
-
-            // Compartilhado entre estados (não pertence a um único painel)
-            btnBack = new Button { Text = "← Voltar", ForeColor = Color.Gray, Location = new Point(20, 540), FlatStyle = FlatStyle.Flat, Visible = false };
-            btnBack.Click += BtnBack_Click;
-            mainPanel.Controls.Add(btnBack);
-
-            mainPanel.ResumeLayout(false);
-            this.ResumeLayout(false);
-        }
-
-        private void HandleDeveloperExit()
+        private async void HandleDeveloperExit()
         {
             _allowClose = true;
+            // Precisa esperar terminar antes de fechar: com fire-and-forget aqui, o this.Close() logo
+            // abaixo podia derrubar o processo antes do HTTP de fim de sessão sair, perdendo o report.
+            await ReportSessionEndIfNeededAsync();
             _session.CancelOperation();
+            _heartbeatTimer?.Stop();
+            if (_realtimeClient != null) _ = _realtimeClient.DisposeAsync();
             if (trayIcon != null) trayIcon?.Visible = false;
             KeyboardHook.Stop();
             RegistryManager.UnlockManagerTask();
@@ -315,9 +672,16 @@ namespace NextLevelAgentClient
         {
             base.OnLoad(e);
             KeyboardHook.Start();
-            RegistryManager.LockManagerTask();
+            bool hasTaskManagerLockPrivilege = RegistryManager.LockManagerTask();
 
-            // Fire and forget hardware sync without freezing the UI layout thread
+            await InitializeWebViewAsync();
+            PostToJs(new { type = "environment", value = AppConfig.Current.Environment.ToString().ToUpperInvariant() });
+
+            if (!hasTaskManagerLockPrivilege)
+            {
+                ShowAlert("error", "Erro de Privilégios", "O Agente precisa de privilégios de Administrador para bloquear o Gerenciador de Tarefas.");
+            }
+
             await SynchronizeHardwareAsync();
         }
 
@@ -331,6 +695,19 @@ namespace NextLevelAgentClient
         protected override CreateParams CreateParams
         {
             get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00000080; return cp; }
+        }
+
+        private sealed class WebMessage
+        {
+            public string Action { get; set; } = string.Empty;
+            public string? Username { get; set; }
+            public string? Password { get; set; }
+            public int Minutes { get; set; }
+            public string? Kind { get; set; }
+            public string? OptionId { get; set; }
+            public string? NewPassword { get; set; }
+            public string? ConfirmPassword { get; set; }
+            public string? Code { get; set; }
         }
     }
 }
